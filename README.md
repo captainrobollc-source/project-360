@@ -206,20 +206,6 @@ folder, drop in `blade`, `tick`, `select`, `back`, `guide`, `toast`, `error`, `l
 - **IGDB**: create an app at dev.twitch.tv, then enter its Client ID and Secret. Adds covers and
   descriptions.
 
-## Avatars
-
-Every profile has a 3D avatar (original character design, rendered with three.js).
-
-- **On Home** your avatar stands at the left, NXE-style, with your gamertag and gamerscore. Other
-  signed-in players stand beside you. It waves when you sign in, cheers when you unlock an
-  achievement, turns its head toward whatever you select, dozes off after 90 seconds without
-  input and stretches when you come back.
-- **Avatar creator**: press A on your avatar (or Social › Gamer card › Edit avatar). Body, skin
-  tone, eyes, brows, mouth, nose and cheeks, hair and colour, facial hair, tops, bottoms, shoes,
-  hats and glasses. Moving over an option previews it live; A keeps it. LT/RT turn the avatar,
-  X zooms, Y makes a random one, Start saves.
-- Profiles without a saved avatar get a stable random one, so everyone has a character from day one.
-
 ## Arcade
 
 Three original games built into the dashboard, on their own **Arcade** blade (between Games and
@@ -353,9 +339,7 @@ src/preload.js       contextBridge API (sandboxed renderer)
 src/renderer/        vanilla ES modules, no build step
   js/dashboard.js    blade manager
   js/blades/*.js     home, games, media, profile, system
-  js/avatar/         avatar model, three.js renderer + animation rig, avatar creator
   js/arcade/         arcade engine (input, pause, leaderboards) and the three games
-  vendor/three/      three.js (MIT), loaded on demand for the avatar
   js/components/     guide, toast, ring, modal/dialog/OSK, details, launch splash, tiles
   js/input.js        native XInput masks + Gamepad API + keyboard/mouse → actions
   js/nav.js          layer stack + spatial focus navigation

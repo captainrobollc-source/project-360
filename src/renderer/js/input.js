@@ -25,14 +25,9 @@ export let lastDevice = 'pad';
 export function setHandler(fn) { handler = fn; }
 export function captureKeys(fn) { keyCapture = fn; return () => { if (keyCapture === fn) keyCapture = null; }; }
 
-// Anything that wants to know the player is still there (the avatar dozes off when idle).
-const activity = new Set();
-export function onActivity(fn) { activity.add(fn); return () => activity.delete(fn); }
-
 let reportedSlot = -1;
 function fire(action, slot, device) {
   lastDevice = device;
-  for (const fn of activity) { try { fn(action); } catch { /* ignore */ } }
   if (device === 'pad') {
     lastSlot = slot;
     scheduleCursorHide();

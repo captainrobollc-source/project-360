@@ -119,7 +119,6 @@ function slotsView() {
       profileId: prof ? prof.id : null,
       gamertag: prof ? prof.gamertag : null,
       avatar: prof ? prof.avatar : 0,
-      avatar3d: prof ? prof.avatar3d || null : null,
       score: prof ? withProfile(prof.id, () => achievements.score()) : 0,
       active: !!prof && prof.id === active,
     };
@@ -644,7 +643,7 @@ handle('settings:set', async (e, key, value) => {
     if (field === 'avatar' && p.avatar !== value) achievements.track('avatar');
     p[field] = value;
     settings.save();
-    if (['avatar', 'avatar3d', 'gamertag'].includes(field)) broadcastSlots(); // other players' views of this profile
+    if (['avatar', 'gamertag'].includes(field)) broadcastSlots(); // other players' views of this profile
   } else {
     settings.set(key, value);
   }
