@@ -1,0 +1,107 @@
+/* ---------- Boot sequence ---------- */
+.boot { position: absolute; inset: 0; z-index: 300; background: #000; overflow: hidden; color: #fff; perspective: 1200px; }
+.boot .glow { position: absolute; left: 50%; top: 46%; width: 1600px; height: 1600px; margin: -800px 0 0 -800px; border-radius: 50%; background: radial-gradient(circle, rgba(120,200,30,.45) 0%, rgba(20,90,10,.2) 30%, transparent 60%); opacity: 0; animation: bootGlow 4.2s ease forwards .9s; }
+.boot .streak { position: absolute; top: 46%; height: 4px; width: 1000px; border-radius: 4px; opacity: 0; filter: drop-shadow(0 0 10px #9bc848); }
+.boot .streak.l { left: 50%; margin-left: -1000px; background: linear-gradient(90deg, transparent, #b8f05a 70%, #fff); transform-origin: 100% 50%; animation: streakL 1s cubic-bezier(.6,0,.4,1) forwards; }
+.boot .streak.r { left: 50%; background: linear-gradient(270deg, transparent, #b8f05a 70%, #fff); transform-origin: 0 50%; animation: streakR 1s cubic-bezier(.6,0,.4,1) forwards; }
+.boot .streak.s2 { top: 41%; animation-delay: .15s; width: 700px; }
+.boot .streak.l.s2 { margin-left: -700px; }
+.boot .streak.s3 { top: 51%; animation-delay: .28s; width: 800px; }
+.boot .streak.l.s3 { margin-left: -800px; }
+.boot .core { position: absolute; left: 50%; top: 46%; width: 260px; height: 260px; margin: -130px 0 0 -130px; transform: scale(0); animation: corePop 1s cubic-bezier(.2,1.4,.4,1) forwards 1s; }
+.boot .core .orb { width: 100%; height: 100%; }
+.boot .rings { position: absolute; left: 50%; top: 46%; width: 0; height: 0; transform-style: preserve-3d; opacity: 0; animation: fadeIn .6s ease forwards 1.2s; }
+.boot .rings i { position: absolute; border-radius: 50%; border: 3px solid rgba(190, 240, 110, .8); box-shadow: 0 0 18px rgba(155,200,72,.8), inset 0 0 18px rgba(155,200,72,.5); }
+.boot .rings i:nth-child(1) { width: 520px; height: 520px; left: -260px; top: -260px; animation: ringSpin1 3.4s linear infinite; }
+.boot .rings i:nth-child(2) { width: 440px; height: 440px; left: -220px; top: -220px; border-color: rgba(230,236,240,.7); box-shadow: 0 0 14px rgba(255,255,255,.6); animation: ringSpin2 2.8s linear infinite; }
+.boot .rings i:nth-child(3) { width: 640px; height: 640px; left: -320px; top: -320px; border-width: 2px; opacity: .55; animation: ringSpin3 4.6s linear infinite; }
+.boot .flash { position: absolute; inset: 0; background: radial-gradient(circle at 50% 46%, #fff 0%, rgba(220,255,170,.8) 18%, transparent 55%); opacity: 0; animation: flash .9s ease-out forwards 1.05s; }
+.boot .word { position: absolute; left: 0; right: 0; top: calc(46% + 200px); text-align: center; font-size: 64px; font-weight: 300; letter-spacing: 30px; opacity: 0; animation: wordIn 1.2s var(--ease) forwards 2.1s; text-shadow: 0 0 30px rgba(155,200,72,.6); }
+.boot .word b { font-weight: 600; }
+.boot .word .shine { position: absolute; inset: 0; background: linear-gradient(100deg, transparent 40%, rgba(255,255,255,.8) 50%, transparent 60%); mix-blend-mode: overlay; animation: shine 1.4s ease forwards 2.8s; transform: translateX(-100%); }
+.boot .skip { position: absolute; right: 60px; bottom: 50px; display: flex; gap: 12px; align-items: center; font-size: 20px; color: rgba(255,255,255,.5); opacity: 0; animation: fadeIn 1s forwards 1.5s; }
+.boot.out { opacity: 0; transition: opacity .8s ease; }
+@keyframes streakL { 0% { opacity: 0; transform: translateX(-900px) scaleX(.3); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateX(0) scaleX(.05); } }
+@keyframes streakR { 0% { opacity: 0; transform: translateX(900px) scaleX(.3); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateX(0) scaleX(.05); } }
+@keyframes corePop { to { transform: scale(1); } }
+@keyframes flash { 0% { opacity: 0; } 15% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes bootGlow { 0% { opacity: 0; transform: scale(.4); } 40% { opacity: 1; } 100% { opacity: .7; transform: scale(1); } }
+@keyframes ringSpin1 { from { transform: rotateX(72deg) rotateZ(0deg); } to { transform: rotateX(72deg) rotateZ(360deg); } }
+@keyframes ringSpin2 { from { transform: rotateY(68deg) rotateZ(0deg); } to { transform: rotateY(68deg) rotateZ(-360deg); } }
+@keyframes ringSpin3 { from { transform: rotateX(60deg) rotateY(30deg) rotateZ(0); } to { transform: rotateX(60deg) rotateY(30deg) rotateZ(360deg); } }
+@keyframes fadeIn { to { opacity: 1; } }
+@keyframes wordIn { from { opacity: 0; letter-spacing: 30px; } to { opacity: 1; letter-spacing: 6px; } }
+@keyframes shine { to { transform: translateX(100%); } }
+
+/* Dashboard entrance after boot */
+body.entering .blade { transition: none; }
+body.entering .header, body.entering .prompts { opacity: 0; }
+.header, .prompts { transition: opacity .6s ease; }
+
+/* ---------- Sign in ---------- */
+.signin { width: 1340px; padding: 44px 50px 40px; }
+.signin h3 { font-size: 46px; margin-bottom: 4px; }
+.signin .sub { font-size: 22px; opacity: .7; margin-bottom: 30px; display: flex; align-items: center; gap: 12px; }
+.signin .profiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+.pcard { position: relative; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 26px 18px 22px; border-radius: 22px; background: var(--card-bg); border: 1px solid var(--card-border); box-shadow: var(--card-shadow); cursor: pointer; transition: transform 200ms var(--ease); }
+.pcard .avatar { width: 150px; height: 150px; }
+.pcard .n { font-size: 26px; font-weight: 600; }
+.pcard .g { display: flex; align-items: center; gap: 8px; font-size: 19px; opacity: .7; }
+.pcard .plus { width: 150px; height: 150px; border-radius: 22%; display: grid; place-items: center; border: 3px dashed currentColor; opacity: .5; }
+.pcard .plus svg { width: 64px; height: 64px; fill: currentColor; }
+.pcard.focused { background: var(--pill); color: #fff; box-shadow: var(--pill-glow); transform: scale(1.05); }
+.pcard.focused .g { opacity: .9; }
+
+/* ---------- Initial setup ---------- */
+.setup { position: absolute; inset: 0; z-index: 250; display: flex; align-items: center; justify-content: center; }
+.setup .sbg { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+.setup .spanel { position: relative; width: 1300px; min-height: 700px; padding: 54px 70px 46px; border-radius: 40px; background: var(--modal-bg); color: var(--modal-ink); border: 1px solid var(--modal-border); box-shadow: 0 40px 120px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.5); display: flex; flex-direction: column; --ink: var(--modal-ink); }
+.setup .step { font-size: 19px; letter-spacing: 3px; text-transform: uppercase; opacity: .55; }
+.setup h1 { font-size: 64px; font-weight: 300; margin: 10px 0 14px; }
+.setup .body { font-size: 24px; line-height: 1.55; opacity: .85; max-width: 1000px; }
+.setup .opts { display: flex; flex-direction: column; gap: 14px; margin-top: 30px; max-width: 760px; }
+.setup .opts .pill-btn { justify-content: flex-start; font-size: 24px; padding: 18px 26px; }
+.setup .opts .pill-btn .val { margin-left: auto; opacity: .6; font-weight: 400; font-size: 20px; }
+.setup .hero-row { display: flex; align-items: center; gap: 40px; margin-top: 26px; }
+.setup .hero-row .avatar { width: 180px; height: 180px; }
+.setup .dots { display: flex; gap: 10px; margin-top: auto; padding-top: 30px; }
+.setup .dots i { width: 12px; height: 12px; border-radius: 50%; background: rgba(0,0,0,.18); }
+body:not(.theme-classic) .setup .dots i { background: rgba(255,255,255,.2); }
+.setup .dots i.on { background: var(--green-2); box-shadow: 0 0 8px rgba(118,185,0,.8); }
+.setup .orbbig { position: absolute; right: 70px; top: 60px; width: 150px; height: 150px; }
+.setup .found { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 24px; }
+.setup .found .stat { min-width: 180px; }
+
+/* ---------- Screensaver ---------- */
+.saver { position: absolute; inset: 0; z-index: 400; background: rgba(0,0,0,.82); opacity: 0; transition: opacity 1.4s ease; pointer-events: none; }
+.saver.in { opacity: 1; }
+.saver .orb { position: absolute; width: 120px; height: 120px; opacity: .55; transition: left 20s linear, top 20s linear; }
+.saver .sclock { position: absolute; right: 80px; bottom: 60px; font-size: 54px; font-weight: 200; color: rgba(255,255,255,.35); }
+
+/* ---------- Picture / video viewer ---------- */
+.viewer { position: absolute; inset: 0; z-index: 120; background: #000; opacity: 0; transition: opacity 300ms ease; color: #fff; }
+.viewer.in { opacity: 1; }
+.viewer img, .viewer video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.viewer img { transition: opacity 400ms ease; }
+.viewer .vbar { position: absolute; left: 0; right: 0; bottom: 0; padding: 70px 60px 34px; background: linear-gradient(180deg, transparent, rgba(0,0,0,.85)); transition: opacity 400ms ease; }
+.viewer.idle .vbar { opacity: 0; }
+.viewer .vt { font-size: 30px; font-weight: 600; }
+.viewer .vs { font-size: 20px; opacity: .7; margin-top: 4px; }
+.viewer .vprog { position: relative; height: 8px; border-radius: 5px; background: rgba(255,255,255,.2); margin: 20px 0 16px; overflow: hidden; }
+.viewer .vprog i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--pill); border-radius: 5px; }
+.viewer .vrow { display: flex; justify-content: space-between; align-items: center; }
+.viewer .vrow .prompt { font-size: 22px; color: #fff; }
+.viewer .vrow .left, .viewer .vrow .right { display: flex; gap: 28px; }
+.viewer .vtime { font-size: 20px; opacity: .8; font-variant-numeric: tabular-nums; }
+.viewer .bigicon { position: absolute; left: 50%; top: 50%; width: 140px; height: 140px; margin: -70px 0 0 -70px; border-radius: 50%; background: rgba(0,0,0,.55); display: grid; place-items: center; opacity: 0; transition: opacity 300ms, transform 300ms; transform: scale(.8); }
+.viewer .bigicon.show { opacity: 1; transform: none; }
+.viewer .bigicon svg { width: 64px; height: 64px; fill: #fff; }
+
+/* ---------- Art picker ---------- */
+.artpick { width: 1500px; }
+.artpick .cands { display: grid; grid-template-columns: repeat(5, 1fr); gap: 20px; max-height: 620px; overflow-y: auto; padding: 14px; margin: -14px; }
+.artpick .cand { aspect-ratio: 2/3; }
+.artpick .cand .label { padding: 30px 12px 10px; }
+.artpick .cand .label .t { font-size: 18px; }
+.artpick .cand .label .s { font-size: 14px; }
+.signin .sub svg { width: 28px; height: 28px; fill: currentColor; flex: none; }

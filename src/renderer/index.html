@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' p360: data: blob: https:; media-src 'self' p360: data: blob:; connect-src 'self' p360:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>Project 360</title>
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/dashboard.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+  <link rel="stylesheet" href="styles/screens.css" />
+</head>
+<body class="theme-classic">
+  <div id="backdrop" aria-hidden="true">
+    <div class="bg-art"></div>
+    <div class="bg-glow"></div>
+    <div class="orbs"><i style="left:12%;top:20%;width:180px;height:180px"></i><i style="left:62%;top:58%;width:120px;height:120px;animation-delay:-8s"></i><i style="left:80%;top:14%;width:70px;height:70px;animation-delay:-15s"></i><i style="left:30%;top:72%;width:90px;height:90px;animation-delay:-22s"></i></div>
+    <svg class="ribbons" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="rg-a" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" style="stop-color:var(--ribbon-a)" stop-opacity="0" />
+          <stop offset=".45" style="stop-color:var(--ribbon-a)" stop-opacity=".22" />
+          <stop offset="1" style="stop-color:var(--ribbon-a)" stop-opacity="0" />
+        </linearGradient>
+        <linearGradient id="rg-b" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" style="stop-color:var(--ribbon-b)" stop-opacity="0" />
+          <stop offset=".55" style="stop-color:var(--ribbon-b)" stop-opacity=".32" />
+          <stop offset="1" style="stop-color:var(--ribbon-b)" stop-opacity="0" />
+        </linearGradient>
+        <linearGradient id="rg-c" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" style="stop-color:var(--ribbon-c)" stop-opacity="0" />
+          <stop offset=".5" style="stop-color:var(--ribbon-c)" stop-opacity=".1" />
+          <stop offset="1" style="stop-color:var(--ribbon-c)" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <g class="ribbon r1"><path d="M-200 760 C 300 560, 800 980, 1300 760 S 2000 600, 2200 700 L 2200 790 C 1900 700, 1500 900, 1200 860 S 400 680, -200 860 Z" fill="url(#rg-a)" /></g>
+      <g class="ribbon r2"><path d="M-200 820 C 400 640, 900 1000, 1500 820 S 2050 700, 2200 760 L 2200 800 C 1950 760, 1600 900, 1300 900 S 500 720, -200 860 Z" fill="url(#rg-b)" /></g>
+      <g class="ribbon r3"><path d="M-200 300 C 300 200, 900 420, 1400 260 S 2000 160, 2200 220 L 2200 250 C 1900 220, 1500 330, 1200 330 S 400 240, -200 340 Z" fill="url(#rg-c)" /></g>
+      <g class="ribbon r4"><path d="M-200 930 C 500 860, 1100 1060, 1700 940 S 2100 900, 2200 920 L 2200 1000 C 1700 1020, 1200 1080, 800 1020 S 100 960, -200 1010 Z" fill="url(#rg-a)" /></g>
+      <g class="ribbon r5"><path d="M-200 520 C 400 380, 1000 700, 1600 480 S 2100 420, 2200 460 L 2200 480 C 1900 460, 1500 640, 1100 620 S 300 460, -200 560 Z" fill="url(#rg-b)" /></g>
+    </svg>
+  </div>
+  <div id="stage"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

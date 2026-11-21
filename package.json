@@ -1,0 +1,88 @@
+{
+  "name": "project-360",
+  "productName": "Project 360",
+  "version": "0.1.0",
+  "description": "Controller-first, 10-foot console dashboard and game launcher for Windows, inspired by the Xbox 360 blades/NXE era.",
+  "main": "src/main/main.js",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/captainrobollc-source/project-360.git"
+  },
+  "scripts": {
+    "build:native": "node scripts/build-native.js",
+    "start": "npm run build:native && electron .",
+    "dev": "npm run build:native && electron . --windowed --dev",
+    "dist": "npm run build:native && electron-builder --win nsis",
+    "dist:portable": "npm run build:native && electron-builder --win portable",
+    "release": "npm run build:native && electron-builder --win nsis --publish always"
+  },
+  "build": {
+    "appId": "com.project360.console",
+    "productName": "Project 360",
+    "directories": {
+      "output": "dist"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "captainrobollc-source",
+        "repo": "project-360",
+        "releaseType": "release"
+      }
+    ],
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/bin",
+        "to": "native",
+        "filter": [
+          "*.exe"
+        ]
+      },
+      {
+        "from": "scripts/shell-launcher.vbs",
+        "to": "shell-launcher.vbs"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signtoolOptions": {
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
+      }
+    },
+    "asarUnpack": [
+      "src/main/reliability/watchdog.js"
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Project 360",
+      "artifactName": "Project-360-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "Project-360-Portable-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "@ghostery/adblocker-electron": "^2.20.3",
+    "electron-updater": "^6.8.11"
+  }
+}

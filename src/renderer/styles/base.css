@@ -1,0 +1,232 @@
+/* Project 360 — tokens, themes, stage scaling, backdrop. */
+:root {
+  --silver: #d8dce0;
+  --silver-2: #aab2ba;
+  --silver-3: #6f7881;
+  --green: #107c10;
+  --green-2: #2f9a14;
+  --lime: #76b900;
+  --lime-glow: #9bc848;
+  --btn-a: #5cbf1d;
+  --btn-b: #e1252f;
+  --btn-x: #2b74db;
+  --btn-y: #f2c315;
+  --gold: #f4c542;
+  --ease: cubic-bezier(.22, .9, .24, 1);
+  --ease-swoosh: cubic-bezier(.65, .02, .18, 1);
+  --font: 'Segoe UI Variable Display', 'Segoe UI', 'Selawik', system-ui, sans-serif;
+  --pill: linear-gradient(180deg, #b6e05a 0%, #6fbf1f 30%, #2f9a14 62%, #1d7d0e 100%);
+  --pill-glow: 0 0 0 2px rgba(255,255,255,.55) inset, 0 4px 18px rgba(80,170,20,.55), 0 0 30px rgba(118,185,0,.35);
+}
+
+/* ---------- Themes ----------
+   Every surface reads these variables so themes swap cleanly. */
+body, body.theme-classic {
+  --backdrop:
+    radial-gradient(60% 55% at 22% 42%, rgba(140, 210, 40, .55) 0%, rgba(40, 120, 20, .25) 35%, transparent 70%),
+    radial-gradient(90% 80% at 80% 0%, #3d4a3a 0%, transparent 60%),
+    linear-gradient(170deg, #1b2a17 0%, #0d160b 45%, #050805 100%);
+  --ribbon-a: #e9f6d0;
+  --ribbon-b: #9bc848;
+  --ribbon-c: #ffffff;
+  --header-ink: #f6f8f4;
+  --header-dim: rgba(240, 246, 236, .7);
+  --blade-bg: linear-gradient(180deg, #ffffff 0%, #f1f3f4 14%, #e2e6e8 62%, #d3d8db 100%);
+  --blade-border: rgba(255,255,255,.95);
+  --blade-shadow: -22px 0 46px rgba(0,0,0,.45), inset 0 2px 0 #fff;
+  --blade-sheen: linear-gradient(180deg, rgba(255,255,255,.85), rgba(255,255,255,0));
+  --edge-gloss: linear-gradient(90deg, rgba(255,255,255,.95), rgba(255,255,255,0));
+  --ink: #22272b;
+  --ink-dim: #5b636b;
+  --ink-faint: #8a929a;
+  --title: #3a4046;
+  --sliver-ink: #4a525a;
+  --card-bg: linear-gradient(180deg, #ffffff 0%, #f3f5f6 100%);
+  --card-border: rgba(0,0,0,.09);
+  --card-shadow: 0 6px 16px rgba(30,40,30,.14);
+  --row-bg: rgba(0,0,0,.035);
+  --row-border: rgba(0,0,0,.05);
+  --chip-bg: rgba(0,0,0,.06);
+  --track: rgba(0,0,0,.12);
+  --shade: rgba(60, 70, 60, .22);
+  --tile-bg: linear-gradient(160deg, #c9cfd3, #9aa2a8);
+  --reflect: rgba(255,255,255,.35);
+  --modal-bg: linear-gradient(180deg, #ffffff 0%, #eef1f2 18%, #dfe3e5 100%);
+  --modal-ink: #22272b;
+  --modal-border: rgba(255,255,255,.95);
+}
+
+body.theme-nxe {
+  --backdrop:
+    radial-gradient(70% 60% at 30% 30%, rgba(60, 140, 30, .35) 0%, transparent 60%),
+    radial-gradient(120% 90% at 18% 8%, #323941 0%, #1a1e23 38%, #0b0d10 72%, #060708 100%);
+  --ribbon-a: #d8dce0;
+  --ribbon-b: #76b900;
+  --ribbon-c: #ffffff;
+  --header-ink: #f3f5f7;
+  --header-dim: rgba(220, 226, 232, .7);
+  --blade-bg: linear-gradient(180deg, rgba(74, 81, 90, .97) 0%, rgba(40, 45, 51, .97) 9%, rgba(22, 25, 29, .98) 60%, rgba(16, 18, 21, .98) 100%);
+  --blade-border: rgba(255,255,255,.16);
+  --blade-shadow: -18px 0 40px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.28);
+  --blade-sheen: linear-gradient(180deg, rgba(255,255,255,.13), rgba(255,255,255,0));
+  --edge-gloss: linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,0));
+  --ink: #f3f5f7;
+  --ink-dim: #a3acb4;
+  --ink-faint: #6c757d;
+  --title: #ffffff;
+  --sliver-ink: #d8dce0;
+  --card-bg: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03));
+  --card-border: rgba(255,255,255,.12);
+  --card-shadow: 0 8px 20px rgba(0,0,0,.4);
+  --row-bg: rgba(255,255,255,.045);
+  --row-border: rgba(255,255,255,.06);
+  --chip-bg: rgba(255,255,255,.07);
+  --track: rgba(255,255,255,.12);
+  --shade: rgba(0,0,0,.45);
+  --tile-bg: linear-gradient(160deg, #39414a, #1d2126);
+  --reflect: rgba(255,255,255,.18);
+  --modal-bg: linear-gradient(180deg, #505860 0%, #2e3339 16%, #1c2024 100%);
+  --modal-ink: #f3f5f7;
+  --modal-border: rgba(255,255,255,.22);
+}
+
+body.theme-carbon {
+  --backdrop: radial-gradient(80% 70% at 50% 110%, rgba(118,185,0,.18), transparent 60%), linear-gradient(180deg, #121212 0%, #050505 100%);
+  --ribbon-a: #9aa0a6; --ribbon-b: #5a8f16; --ribbon-c: #ffffff;
+  --header-ink: #eceff1; --header-dim: rgba(220,224,228,.6);
+  --blade-bg: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 12%, #111 100%);
+  --blade-border: rgba(255,255,255,.1);
+  --blade-shadow: -18px 0 40px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.12);
+  --blade-sheen: repeating-linear-gradient(45deg, rgba(255,255,255,.025) 0 2px, transparent 2px 6px), linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0));
+  --edge-gloss: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,0));
+  --ink: #eceff1; --ink-dim: #9aa0a6; --ink-faint: #61666b; --title: #ffffff; --sliver-ink: #c0c4c8;
+  --card-bg: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  --card-border: rgba(255,255,255,.08); --card-shadow: 0 8px 20px rgba(0,0,0,.6);
+  --row-bg: rgba(255,255,255,.035); --row-border: rgba(255,255,255,.05); --chip-bg: rgba(255,255,255,.06);
+  --track: rgba(255,255,255,.1); --shade: rgba(0,0,0,.55); --tile-bg: linear-gradient(160deg, #2c2c2c, #151515);
+  --reflect: rgba(255,255,255,.12);
+  --modal-bg: linear-gradient(180deg, #333 0%, #1b1b1b 18%, #101010 100%); --modal-ink: #eceff1; --modal-border: rgba(255,255,255,.14);
+}
+
+body.theme-aurora {
+  --backdrop:
+    radial-gradient(55% 50% at 25% 35%, rgba(90, 70, 230, .55), transparent 70%),
+    radial-gradient(50% 45% at 80% 70%, rgba(20, 190, 170, .45), transparent 70%),
+    linear-gradient(170deg, #170f33 0%, #0a0a1f 55%, #04040c 100%);
+  --ribbon-a: #c8c0ff; --ribbon-b: #3ae0c8; --ribbon-c: #ffffff;
+  --header-ink: #f2f0ff; --header-dim: rgba(230,226,255,.7);
+  --blade-bg: linear-gradient(180deg, rgba(70, 64, 110, .95) 0%, rgba(34, 30, 62, .96) 12%, rgba(18, 16, 36, .97) 100%);
+  --blade-border: rgba(200,190,255,.2);
+  --blade-shadow: -18px 0 44px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.25);
+  --blade-sheen: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,0));
+  --edge-gloss: linear-gradient(90deg, rgba(200,190,255,.16), rgba(255,255,255,0));
+  --ink: #f2f0ff; --ink-dim: #b0aad6; --ink-faint: #7871a3; --title: #ffffff; --sliver-ink: #d6d0ff;
+  --card-bg: linear-gradient(180deg, rgba(255,255,255,.1), rgba(255,255,255,.03));
+  --card-border: rgba(200,190,255,.14); --card-shadow: 0 8px 20px rgba(0,0,0,.45);
+  --row-bg: rgba(255,255,255,.05); --row-border: rgba(255,255,255,.06); --chip-bg: rgba(255,255,255,.08);
+  --track: rgba(255,255,255,.12); --shade: rgba(5,0,20,.5); --tile-bg: linear-gradient(160deg, #3a3466, #1a1733);
+  --reflect: rgba(220,210,255,.18);
+  --modal-bg: linear-gradient(180deg, #4d4680 0%, #2a2550 16%, #17142e 100%); --modal-ink: #f2f0ff; --modal-border: rgba(200,190,255,.25);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: var(--ink);
+  font-family: var(--font);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+body.hide-cursor, body.hide-cursor * { cursor: none !important; }
+body.suspended * { animation-play-state: paused !important; }
+img { -webkit-user-drag: none; }
+
+/* 1920x1080 design stage, uniformly scaled to the screen. */
+#stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+  overflow: hidden;
+}
+
+/* ---------- Backdrop ---------- */
+#backdrop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--backdrop);
+  transition: background 800ms ease;
+}
+#backdrop .bg-art {
+  position: absolute; inset: -4%;
+  background-size: cover; background-position: center;
+  opacity: 0;
+  filter: blur(26px) saturate(1.2) brightness(.55);
+  transition: opacity 1.2s ease;
+}
+body.bg-gameart #backdrop .bg-art.on { opacity: 1; }
+#backdrop .bg-glow {
+  position: absolute;
+  inset: -10%;
+  background:
+    radial-gradient(40% 30% at 70% 105%, color-mix(in srgb, var(--ribbon-b) 30%, transparent), transparent 70%),
+    radial-gradient(30% 25% at 10% 100%, color-mix(in srgb, var(--ribbon-b) 22%, transparent), transparent 70%);
+  animation: glowDrift 22s ease-in-out infinite alternate;
+}
+#backdrop .orbs { position: absolute; inset: 0; }
+#backdrop .orbs i {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,.55), color-mix(in srgb, var(--ribbon-b) 40%, transparent) 40%, transparent 70%);
+  filter: blur(1px);
+  opacity: .35;
+  animation: float 30s ease-in-out infinite alternate;
+}
+#backdrop .ribbons {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transition: transform 1100ms var(--ease);
+}
+.ribbon { transform-box: fill-box; transform-origin: center; will-change: transform; }
+.ribbon.r1 { animation: ribbonA 26s ease-in-out infinite alternate; }
+.ribbon.r2 { animation: ribbonB 31s ease-in-out infinite alternate; }
+.ribbon.r3 { animation: ribbonA 37s ease-in-out infinite alternate-reverse; }
+.ribbon.r4 { animation: ribbonB 29s ease-in-out infinite alternate-reverse; }
+.ribbon.r5 { animation: ribbonA 41s ease-in-out infinite alternate; }
+
+@keyframes ribbonA {
+  from { transform: translate3d(-60px, 0, 0) rotate(-1.2deg) scaleY(1); }
+  to   { transform: translate3d(60px, -18px, 0) rotate(1deg) scaleY(1.25); }
+}
+@keyframes ribbonB {
+  from { transform: translate3d(50px, 10px, 0) rotate(.8deg) scaleY(.9); }
+  to   { transform: translate3d(-70px, -14px, 0) rotate(-1.4deg) scaleY(1.2); }
+}
+@keyframes glowDrift {
+  from { transform: translate3d(-2%, 0, 0); opacity: .8; }
+  to   { transform: translate3d(2%, -2%, 0); opacity: 1; }
+}
+@keyframes float {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(80px, -60px, 0) scale(1.25); }
+}
+
+/* Overlay mode: transparent window above games. */
+body.mode-overlay { background: transparent; }
+body.mode-overlay #backdrop { display: none; }
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon, #backdrop .bg-glow, #backdrop .orbs i { animation: none; }
+}
