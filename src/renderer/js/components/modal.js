@@ -9,9 +9,19 @@ let root = null;
 export function setRoot(el) { root = el; }
 export function getRoot() { return root; }
 
+// Every modal stacks above whatever opened it: the dashboard, the Guide (80), the photo viewer
+// (120) or the setup wizard (250). Below the screensaver (400).
+const Z_BASE = 260;
+let openCount = 0;
+let zTop = Z_BASE;
+
 export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, scrim = true, sound: openSound = null }) {
   const scrimEl = scrim ? h('div.scrim') : null;
   const panel = h(`div.${panelClass.split(' ').join('.')}`);
+  if (openCount++ === 0) zTop = Z_BASE;
+  zTop += 2;
+  if (scrimEl) scrimEl.style.zIndex = String(zTop - 1);
+  panel.style.zIndex = String(zTop);
   if (scrimEl) root.append(scrimEl);
   root.append(panel);
   const focus = new nav.Focus(panel);
@@ -31,6 +41,7 @@ export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, 
   function close(value) {
     if (closed) return;
     closed = true;
+    openCount = Math.max(0, openCount - 1);
     nav.pop(layer);
     panel.classList.remove('in');
     if (scrimEl) scrimEl.classList.remove('in');
