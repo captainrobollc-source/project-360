@@ -8,6 +8,7 @@ const { Readable } = require('stream');
 
 const { JsonStore } = require('./store');
 const native = require('./native');
+const radio = require('./radio');
 const launcher = require('./launcher');
 const system = require('./system');
 const media = require('./media');
@@ -728,6 +729,20 @@ handle('system:info', async () => {
 });
 handle('system:storage', async () => { const si = svc('sysinfo'); return si ? si.getStorage(Object.values(library.games())) : []; });
 handle('system:network', async () => { const si = svc('sysinfo'); return si ? si.testNetwork() : []; });
+
+// ---- Bluetooth & Wi-Fi (System › Bluetooth / Network)
+radio.events.on('event', (ev) => send(main, 'radio:event', ev));
+handle('radio:radios', () => radio.radios());
+handle('radio:set', (e, kind, on) => radio.setRadio(kind, on));
+handle('bt:paired', () => radio.paired());
+handle('bt:scan', (e, on) => radio.scan(on));
+handle('bt:pair', (e, id) => radio.pair(id));
+handle('bt:reply', (e, id, accept, pin) => radio.reply(id, accept, pin));
+handle('bt:unpair', (e, id) => radio.unpair(id));
+handle('wifi:list', (e, rescan) => radio.wifi(rescan !== false));
+handle('wifi:connect', (e, ssid, password, auto) => radio.connect(ssid, password, auto));
+handle('wifi:disconnect', () => radio.disconnect());
+handle('wifi:forget', (e, ssid) => radio.forget(ssid));
 handle('sounds:list', () => soundPacks());
 handle('pads:refresh', () => native.call('pad.battery'));
 handle('pad:rumble', (e, slot, l, r, ms) => native.call('pad.rumble', slot, l, r, ms));
@@ -1092,5 +1107,6 @@ app.on('will-quit', () => {
   if (emuOn) native.call('emu.off').catch(() => {});
   if (taskbarHidden) native.call('taskbar.show').catch(() => {});
   native.stop();
+  radio.stop();
 });
 process.on('uncaughtException', (e) => console.error('[main] uncaught', e));

@@ -94,6 +94,23 @@ contextBridge.exposeInMainWorld('p360', {
     refreshPads: () => call('pads:refresh'),
     rumble: (slot, l, r, ms) => call('pad:rumble', slot, l, r, ms),
   },
+  radio: {
+    radios: () => call('radio:radios'),
+    set: (kind, on) => call('radio:set', kind, on),
+  },
+  bt: {
+    paired: () => call('bt:paired'),
+    scan: (on) => call('bt:scan', on),
+    pair: (id) => call('bt:pair', id),
+    reply: (id, accept, pin) => call('bt:reply', id, accept, pin),
+    unpair: (id) => call('bt:unpair', id),
+  },
+  wifi: {
+    list: (rescan) => call('wifi:list', rescan),
+    connect: (ssid, password, auto) => call('wifi:connect', ssid, password, auto),
+    disconnect: () => call('wifi:disconnect'),
+    forget: (ssid) => call('wifi:forget', ssid),
+  },
   launcher: {
     resume: () => call('launcher:resume'),
     forceClose: () => call('launcher:forceClose'),

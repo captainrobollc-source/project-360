@@ -397,3 +397,8 @@ img.pixel, .pixel-bg { image-rendering: pixelated; }
 /* the list column must not grow past the blade, so it can scroll */
 .split { grid-template-rows: minmax(0, 1fr); }
 .bl-item { flex: none; } /* keep full height; the list scrolls instead of squeezing */
+
+/* System › Network / Bluetooth */
+.pane h3.sec { margin: 26px 0 10px; font-size: 18px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--ink-dim); }
+.row.connected .k::after { content: ''; display: inline-block; width: 10px; height: 10px; margin-left: 12px; border-radius: 50%; background: var(--green-2); box-shadow: 0 0 8px rgba(118,185,0,.8); vertical-align: middle; }
+.row .val.wbars { font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif; letter-spacing: -1px; min-width: 64px; text-align: right; }

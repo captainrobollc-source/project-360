@@ -3,7 +3,8 @@
 import { h, clamp } from '../util.js';
 import * as sound from '../sound.js';
 import { state, setting, saveSetting, set as setState, track } from '../store.js';
-import { confirm, osk, button } from '../components/modal.js';
+import { confirm, osk, button, menu } from '../components/modal.js';
+import { addDevice, joinWifi, listenForPairing, bars, KIND_LABEL } from '../components/devices.js';
 import { batteryEl, batteryText } from '../components/ring.js';
 import { createSplit } from './split.js';
 import { THEMES, BACKGROUNDS } from '../theme.js';
@@ -61,10 +62,12 @@ const info = (k, d, v) => row(k, d, v ? h('div.val', {}, v) : null, 'info');
 const gb = (n) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB` : `${(n / 1e9).toFixed(1)} GB`);
 
 export function systemBlade(ctx) {
+  let wifiCache = null;   // { at, data } from the last Wi-Fi scan
+  let wifiScanning = false;
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
     ['web', 'Web & media', 'globe'], ['audio', 'Audio', 'volume'], ['controllers', 'Controllers', 'controller'],
-    ['storage', 'Storage', 'folder'], ['network', 'Network', 'live'], ['info', 'Console info', 'info'], ['updates', 'Updates', 'restart'], ['backup', 'Backup & restore', 'shield'], ['power', 'Power & shell', 'power'],
+    ['storage', 'Storage', 'folder'], ['network', 'Network', 'wifi'], ['bluetooth', 'Bluetooth', 'bluetooth'], ['info', 'Console info', 'info'], ['updates', 'Updates', 'restart'], ['backup', 'Backup & restore', 'shield'], ['power', 'Power & shell', 'power'],
   ];
 
   const B = {
@@ -206,8 +209,66 @@ export function systemBlade(ctx) {
       return out;
     },
 
-    network: () => {
+    network: async () => {
       const rows = [];
+      let radios = [];
+      try { radios = await window.p360.radio.radios(); } catch { /* helper missing */ }
+      const wifiRadio = radios.find((r) => r.kind === 'wifi');
+      if (wifiRadio) {
+        rows.push(toggleRow('Wi-Fi', wifiRadio.state === 'on' ? 'On' : 'Off', () => wifiRadio.state === 'on', async (v) => {
+          try { radios = await window.p360.radio.set('wifi', v); wifiCache = null; } catch (e) { ctx.toast({ title: e.message, sound: 'error' }); }
+          split.rerender();
+        }));
+      }
+      // Show the last scan right away; rescan once when the section opens.
+      const fresh = wifiCache && Date.now() - wifiCache.at < 20000;
+      if (!fresh && (!wifiRadio || wifiRadio.state === 'on')) {
+        if (!wifiCache) { try { wifiCache = { at: 0, data: await window.p360.wifi.list(false) }; } catch { /* shown below */ } }
+        if (!wifiScanning) {
+          wifiScanning = true;
+          window.p360.wifi.list(true).then((data) => { wifiCache = { at: Date.now(), data }; }).catch(() => {}).finally(() => {
+            wifiScanning = false;
+            if (split.current() === 'network') split.rerender();
+          });
+        }
+      }
+      const data = wifiCache && wifiCache.data;
+      if (wifiRadio && wifiRadio.state !== 'on') rows.push(info('Wi-Fi is off', 'Turn it on to see networks.'));
+      else if (!data) rows.push(info(wifiScanning ? 'Searching…' : 'Wi-Fi unavailable', null));
+      else if (!data.available) rows.push(info('Wi-Fi unavailable', data.error || 'No Wi-Fi adapter found. Wired connections work as usual.'));
+      else {
+        rows.push(h('h3.sec', {}, wifiScanning ? 'available networks · searching…' : 'available networks'));
+        for (const n of data.networks) {
+          const on = n.ssid === data.connected;
+          const band = n.ghz ? (n.ghz >= 5.9 ? '6 GHz' : n.ghz >= 5 ? '5 GHz' : '2.4 GHz') : null;
+          const detail = [on ? 'Connected' : null, n.secure ? 'Secured' : 'Open', band, n.saved && !on ? 'Saved' : null].filter(Boolean).join(' · ');
+          const r = row(n.ssid, detail, h('div.val.wbars', {}, bars(n.bars)), on ? 'connected' : '');
+          r._activate = async () => {
+            if (on || n.saved) {
+              const items = on ? [{ label: 'Disconnect', value: 'off', icon: 'close' }] : [{ label: 'Connect', value: 'on', icon: 'wifi' }];
+              items.push({ label: 'Forget network', value: 'forget', icon: 'eyeoff', danger: true }, { label: 'Cancel', value: null });
+              const pick = await menu({ title: n.ssid, items });
+              if (pick === 'off') {
+                await window.p360.wifi.disconnect().catch(() => {});
+                ctx.toast({ title: `Disconnected from ${n.ssid}`, sound: 'back' });
+              } else if (pick === 'on') {
+                await joinWifi(n, { toast: ctx.toast });
+              } else if (pick === 'forget') {
+                const ok = await confirm({ title: `Forget ${n.ssid}?`, text: 'The saved password is removed. You can join again later.', buttons: [{ label: 'Forget', value: true, danger: true }, { label: 'Cancel', value: false }] });
+                if (!ok) return;
+                const res = await window.p360.wifi.forget(n.ssid).catch(() => ({ ok: false }));
+                ctx.toast({ title: res.ok ? `Forgot ${n.ssid}` : `Couldn’t forget ${n.ssid}`, sound: res.ok ? 'back' : 'error' });
+              } else return;
+            } else if (!(await joinWifi(n, { toast: ctx.toast }))) return;
+            wifiCache = null;
+            split.rerender();
+          };
+          rows.push(r);
+        }
+        if (!data.networks.length) rows.push(info('No networks found', null));
+        rows.push(actionRow('Search again', 'Look for Wi-Fi networks nearby.', () => { wifiCache = null; split.rerender(); }));
+      }
+
       const results = h('div');
       const runTest = async () => {
         results.replaceChildren(info('Testing…', 'Network adapter · DNS · Internet · Steam · Epic · Xbox'));
@@ -217,8 +278,44 @@ export function systemBlade(ctx) {
         const ok = res.length && res.every((r) => r.ok);
         ctx.toast({ title: ok ? 'Connection test passed' : 'Connection problems found', sound: ok ? 'select' : 'error' });
       };
+      rows.push(h('h3.sec', {}, 'connection'));
       rows.push(actionRow('Test network connection', 'Checks your adapter, DNS, internet and game services.', runTest));
       rows.push(results);
+      return rows;
+    },
+
+    bluetooth: async () => {
+      listenForPairing();
+      const rows = [];
+      let radios = [];
+      try { radios = await window.p360.radio.radios(); } catch (e) { return [info('Bluetooth unavailable', e.message)]; }
+      const bt = radios.find((r) => r.kind === 'bluetooth');
+      if (!bt) return [info('No Bluetooth adapter', 'This PC doesn’t have Bluetooth, or it’s turned off in Device Manager. A USB Bluetooth adapter works too.')];
+      rows.push(toggleRow('Bluetooth', bt.state === 'on' ? 'On' : 'Off', () => bt.state === 'on', async (v) => {
+        try { await window.p360.radio.set('bluetooth', v); } catch (e) { ctx.toast({ title: e.message, sound: 'error' }); }
+        split.rerender();
+      }));
+      if (bt.state !== 'on') { rows.push(info('Bluetooth is off', 'Turn it on to add or use wireless devices.')); return rows; }
+      rows.push(actionRow('Add a device', 'Controllers, headphones, keyboards and more.', async () => { if (await addDevice({ toast: ctx.toast })) split.rerender(); }));
+      let paired = [];
+      try { paired = await window.p360.bt.paired(); } catch (e) { rows.push(info('Couldn’t list devices', e.message)); }
+      rows.push(h('h3.sec', {}, 'your devices'));
+      if (!paired.length) rows.push(info('No devices yet', 'Pick Add a device to pair one.'));
+      for (const d of paired) {
+        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : 'Not connected'}`, h('div.val', {}, d.connected ? '●' : ''), d.connected ? 'connected' : '');
+        r._activate = async () => {
+          const pick = await menu({ title: d.name, items: [{ label: 'Remove device', value: 'remove', icon: 'close', danger: true }, { label: 'Cancel', value: null }] });
+          if (pick !== 'remove') return;
+          const ok = await confirm({ title: `Remove ${d.name}?`, text: 'It’s unpaired from this PC. To use it again, pair it with Add a device.', buttons: [{ label: 'Remove', value: true, danger: true }, { label: 'Cancel', value: false }] });
+          if (!ok) return;
+          let res = null;
+          try { res = await window.p360.bt.unpair(d.id); } catch (e) { res = { ok: false, status: e.message }; }
+          ctx.toast({ title: res.ok ? `${d.name} removed` : `Couldn’t remove ${d.name}`, text: res.ok ? '' : res.status, sound: res.ok ? 'back' : 'error' });
+          split.rerender();
+        };
+        rows.push(r);
+      }
+      rows.push(info('Tip', 'Paired devices reconnect by themselves when you turn them on.'));
       return rows;
     },
 

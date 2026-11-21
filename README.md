@@ -152,7 +152,8 @@ Game Bar using this button on a controller"*.
 **System**
 - Console, Themes, Library, Artwork, Web & media, Audio, Controllers.
 - **Storage**: drives with game sizes.
-- **Network test**: adapter, DNS, internet, Steam, Epic, Xbox.
+- **Network**: Wi-Fi on/off, nearby networks with signal and band, join with the on-screen keyboard (saved networks connect without asking), disconnect, forget. Plus a connection test: adapter, DNS, internet, Steam, Epic, Xbox.
+- **Bluetooth**: on/off, **Add a device** (live scan; pairs controllers, headphones, keyboards and mice, with PIN prompts when a device needs one), and your paired devices with connection state and Remove.
 - **Console info**: CPU, GPU, RAM, uptime.
 - **Power & shell**: shell mode and the desktop fail-safes.
 - **Initial setup wizard** on first run.
@@ -313,6 +314,7 @@ src/main/            Electron main process
   art.js             artwork + metadata cache
   system.js          power, startup, shell mode, explorer fail-safe
   media.js           media app detection
+  radio.js           Bluetooth + Wi-Fi (p360-radio.exe, netsh for saved profiles)
   reliability/       logger, heartbeat + watchdog.js (detached), backups, auto-updater
 src/preload.js       contextBridge API (sandboxed renderer)
 src/renderer/        vanilla ES modules, no build step
@@ -322,6 +324,7 @@ src/renderer/        vanilla ES modules, no build step
   js/input.js        native XInput masks + Gamepad API + keyboard/mouse → actions
   js/nav.js          layer stack + spatial focus navigation
   js/sound.js        WebAudio synth + sound packs
+native/P360Radio.cs  Bluetooth scan/pair/unpair + Wi-Fi scan/connect (WinRT device APIs)
 native/P360Native.cs XInput (incl. Guide via XInputGetStateEx, battery, rumble), WinMM
                      PlayStation-button detection, Core Audio volume + default device
                      (IPolicyConfig), process lookup by path, force-foreground, sleep
