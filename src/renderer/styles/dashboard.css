@@ -61,7 +61,7 @@
 }
 .blade .accent { position: absolute; left: 0; top: 30px; bottom: 30px; width: 7px; border-radius: 0 6px 6px 0; background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 20%, transparent)); }
 .blade .sliver-label {
-  position: absolute; left: 0; top: 0; width: 58px; height: 100%;
+  position: absolute; left: 0; top: 0; width: 52px; height: 100%;
   display: flex; align-items: flex-start; justify-content: flex-end;
   padding: 34px 0;
   writing-mode: vertical-rl; transform: rotate(180deg);
@@ -436,3 +436,42 @@ img.pixel, .pixel-bg { image-rendering: pixelated; }
 .home .quick-tile svg { width: 42px; height: 42px; }
 .home .quick-tile .t { font-size: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .home .quick-tile .s { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Arcade blade ---------- */
+.arcadeb { display: grid; grid-template-columns: 1fr 470px; gap: 34px; height: 100%; }
+.arcadeb .arc-shelf { display: flex; gap: 34px; align-items: flex-start; padding: 18px 0 0 6px; }
+.arcadeb .arc-item { width: 268px; flex: none; }
+.arcadeb .arc-item .tile { width: 268px; height: 402px; }
+.arcadeb .arc-name { margin-top: 18px; font-size: 26px; font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arcadeb .arc-best { font-size: 19px; font-weight: 600; margin-top: 4px; }
+.arcadeb .arc-info { display: flex; flex-direction: column; padding: 26px 30px; border-radius: 26px; background: var(--card-bg); border: 1px solid var(--card-border); box-shadow: var(--card-shadow); min-height: 0; overflow: hidden; }
+.arcadeb .arc-k { font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-dim); margin: 16px 0 8px; }
+.arcadeb .arc-k:first-child { margin-top: 0; }
+.arcadeb .arc-ptitle { font-size: 44px; font-weight: 300; line-height: 1.05; }
+.arcadeb .arc-desc { font-size: 17px; line-height: 1.45; color: var(--ink-dim); margin-top: 8px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.arcadeb .arc-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+.arcadeb .arc-stats .stat { padding: 10px 12px; border-radius: 14px; background: var(--row-bg); border: 1px solid var(--row-border); }
+.arcadeb .arc-stats .v { font-size: 24px; font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arcadeb .arc-stats .k { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink-dim); }
+.arc-lb { display: flex; flex-direction: column; gap: 4px; }
+.arc-lrow { display: grid; grid-template-columns: 26px 32px 1fr auto; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 10px; font-size: 18px; color: var(--ink); }
+.arc-lrow .avatar { width: 30px; height: 30px; }
+.arc-lrow .rk { color: var(--ink-dim); font-weight: 600; text-align: right; }
+.arc-lrow .gt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arc-lrow .sc { font-variant-numeric: tabular-nums; font-weight: 600; }
+.arc-lrow.me { background: var(--pill); color: #fff; box-shadow: var(--pill-glow); }
+.arc-lrow.me .rk { color: #fff; }
+.arc-lb.big .arc-lrow { font-size: 22px; padding: 6px 12px; grid-template-columns: 34px 40px 1fr auto; }
+.arc-lb.big .arc-lrow .avatar { width: 38px; height: 38px; }
+.arcadeb .arc-empty { font-size: 17px; color: var(--ink-dim); padding: 4px 0; }
+.arcadeb .arc-ach { display: flex; flex-direction: column; gap: 6px; }
+.arcadeb .arc-a { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 12px; padding: 6px 10px; border-radius: 12px; background: var(--row-bg); opacity: .55; }
+.arcadeb .arc-a.on { opacity: 1; }
+.arcadeb .arc-a .ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(128,128,128,.25); }
+.arcadeb .arc-a.on .ic { background: linear-gradient(180deg, #ffd75a, #c8901a); }
+.arcadeb .arc-a .ic svg { width: 20px; height: 20px; fill: currentColor; }
+.arcadeb .arc-a.on .ic svg { fill: #3a2800; }
+.arcadeb .arc-a .t { font-size: 16px; font-weight: 600; color: var(--title); }
+.arcadeb .arc-a .d { font-size: 13px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arcadeb .arc-a .pts { font-size: 15px; font-weight: 600; color: var(--ink-dim); }
+.arc-board-dlg { width: 760px; }

@@ -47,6 +47,12 @@ export async function saveSetting(path, value) {
 
 export function gameById(id) { return state.library.find((g) => g.id === id); }
 
+// Retro games live on the Retro blade and arcade games on the Arcade blade; the Games blade
+// (and Home's suggestions) show everything else.
+export const isRetro = (g) => !!(g && g.systemId);
+export const isArcadeGame = (g) => !!(g && g.source === 'arcade');
+export const isMainGame = (g) => !isRetro(g) && !isArcadeGame(g);
+
 export function visibleGames() {
   const showHidden = setting('library.showHidden');
   return state.library.filter((g) => showHidden || !g.hidden);

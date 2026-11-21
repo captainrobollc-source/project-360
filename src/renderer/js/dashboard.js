@@ -10,13 +10,13 @@ import { marketBlade } from './blades/marketplace.js';
 import { socialBlade } from './blades/social.js';
 import { homeBlade } from './blades/home.js';
 import { gamesBlade } from './blades/games.js';
+import { arcadeBlade } from './blades/arcade.js';
 import { retroBlade } from './blades/retro.js';
 import { mediaBlade } from './blades/media.js';
 import { systemBlade } from './blades/system.js';
 
 const L = 48;      // left margin
-const S = 58;      // visible sliver of a stacked blade
-const W = 1476;    // blade width: 1920 - 2*48 - 6*58
+const S = 52;      // visible sliver of a stacked blade
 const HOME = 2;
 
 export function createDashboard(stage, { toast, guide, signIn }) {
@@ -59,13 +59,14 @@ export function createDashboard(stage, { toast, guide, signIn }) {
   let active = HOME;
   const ctx = { toast, signIn, goto: (id, opts) => goto(id, opts), refreshPrompts: () => nav.refreshPrompts() };
 
-  const defs = [marketBlade, socialBlade, homeBlade, gamesBlade, retroBlade, mediaBlade, systemBlade];
+  const defs = [marketBlade, socialBlade, homeBlade, gamesBlade, arcadeBlade, retroBlade, mediaBlade, systemBlade];
+  const W = 1920 - 2 * L - (defs.length - 1) * S; // blade width: every other blade shows a sliver
   const blades = defs.map((make, i) => {
     const content = h('div.content');
     const ambient = h('div.ambient');
     const sub = h('div.blade-sub');
     const b = make({ ...ctx, setAmbient: (url) => setAmbient(ambient, url), setSub: (t) => { sub.textContent = t || ''; } });
-    const el = h('div.blade', { style: { '--accent': b.accent || 'var(--lime)', zIndex: i } },
+    const el = h('div.blade', { style: { '--accent': b.accent || 'var(--lime)', zIndex: i, width: `${W}px` } },
       ambient, h('div.accent'), h('div.sliver-label', {}, b.label), h('div.blade-title', {}, b.label), sub, content, h('div.shade'));
     el.addEventListener('click', (e) => { if (blades[active] !== blade && !e.target.closest('[data-focus]')) switchTo(i); });
     const blade = { ...b, el, content };

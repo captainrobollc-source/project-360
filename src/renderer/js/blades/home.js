@@ -2,7 +2,7 @@
 import { h, artUrl, fmtAgo, fmtPlaytime } from '../util.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
-import { state, visibleGames, recentGames } from '../store.js';
+import { state, visibleGames, recentGames, isMainGame } from '../store.js';
 import { wideTile, quickTile } from '../components/tiles.js';
 import { launchGame } from '../components/launch.js';
 import { openDetails } from '../components/details.js';
@@ -90,7 +90,9 @@ export function homeBlade(ctx) {
 
   function render() {
     if (focus.current) focusKey = focus.current.dataset.key;
-    const all = visibleGames();
+    // Recently played covers everything you played; the suggestions that fill the rest of
+    // Home come from the Games blade only (retro and arcade games have their own blades).
+    const all = visibleGames().filter(isMainGame);
     const recent = recentGames(5);
     const extra = all.filter((g) => !recent.includes(g)).sort((a, b) => (b.favorite - a.favorite) || (b.addedAt - a.addedAt));
     const picks = [...recent, ...extra].slice(0, 5);

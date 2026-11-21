@@ -2,7 +2,7 @@
 import { h, artUrl, fmtAgo, fmtPlaytime, SOURCE_LABEL } from '../util.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
-import { state, setting, saveSetting, track } from '../store.js';
+import { state, setting, saveSetting, track, isMainGame } from '../store.js';
 import { coverTile } from '../components/tiles.js';
 import { launchGame } from '../components/launch.js';
 import { openDetails } from '../components/details.js';
@@ -47,7 +47,7 @@ export function gamesBlade(ctx) {
 
   function list() {
     const showHidden = setting('library.showHidden');
-    let out = state.library.filter((g) => showHidden || !g.hidden);
+    let out = state.library.filter((g) => (showHidden || !g.hidden) && isMainGame(g));
     if (filter === 'fav') out = out.filter((g) => g.favorite);
     else if (filter === 'recent') out = out.filter((g) => g.lastPlayed);
     else if (filter !== 'all') out = out.filter((g) => g.source === filter);
@@ -63,8 +63,8 @@ export function gamesBlade(ctx) {
   }
 
   function renderShelves() {
-    const sources = [...new Set(state.library.map((g) => g.source))];
-    const chips = [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['arcade', 'steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
+    const sources = [...new Set(state.library.filter(isMainGame).map((g) => g.source))];
+    const chips = [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
     if (!chips.some(([k]) => k === filter)) filter = 'all';
     const focusedChip = focus.current && focus.current.dataset.chip;
     shelves.replaceChildren();

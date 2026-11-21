@@ -48,7 +48,7 @@ Game Bar using this button on a controller"*.
 ## Features
 
 **Look & feel**
-- **Blades dashboard**: six blades (marketplace · social · home · games · media · system). It starts on Home with blades stacked on both sides, which peek out as labelled slivers and sweep across with LB/RB. Blade tabs run across the header.
+- **Blades dashboard**: eight blades (marketplace · social · home · games · arcade · retro · media · system). It starts on Home with blades stacked on both sides, which peek out as labelled slivers and sweep across with LB/RB. Blade tabs run across the header.
 - **Themes**:
   - **Classic Blades**: glossy silver blades with green pill highlights.
   - **NXE Night**, **Carbon** and **Aurora**.
@@ -222,9 +222,13 @@ Every profile has a 3D avatar (original character design, rendered with three.js
 
 ## Arcade
 
-Three original games built into the dashboard. They're in your library (Games › Arcade, and
-Home), keep playtime like any game, and each has a leaderboard shared by every profile on the
-console. Arcade achievements count toward your gamerscore.
+Three original games built into the dashboard, on their own **Arcade** blade (between Games and
+Retro): big covers, and for the selected game its description, your best and rank, playtime,
+leaderboard and achievements (Y shows the full leaderboard). They keep playtime like any game,
+each leaderboard is shared by every profile on the console, and arcade achievements count
+toward your gamerscore. Arcade and retro games stay on their own blades; the Games blade and
+Home's suggestions show the rest of your library (Home's recently played still shows anything
+you played).
 
 - **Pulse Arena**: twin-stick shooter inside a ring of light. Left stick moves, right stick
   aims and fires, LB/RB drop a bomb.

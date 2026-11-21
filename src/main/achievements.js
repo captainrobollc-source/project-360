@@ -49,7 +49,7 @@ const DEFS = [
   { id: 'glow-cascade', title: 'Chain Reaction', desc: 'Glow Link: set off a 5-step cascade.', points: 20, icon: 'trophy' },
   { id: 'glow-nova', title: 'Supernova', desc: 'Glow Link: make a Nova orb by matching five.', points: 15, icon: 'trophy' },
 ];
-const BLADES = ['marketplace', 'social', 'home', 'games', 'retro', 'media', 'system'];
+const BLADES = ['marketplace', 'social', 'home', 'games', 'arcade', 'retro', 'media', 'system'];
 const DEF = Object.fromEntries(DEFS.map((d) => [d.id, d]));
 
 class Achievements extends EventEmitter {
