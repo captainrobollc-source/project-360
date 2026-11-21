@@ -18,12 +18,12 @@ export function ringSvg(lit = [], me = -1, cls = 'ringsvg') {
   const n = ++uid;
   return `<svg class="${cls}" viewBox="0 0 80 80">
     <defs>
-      <linearGradient id="qOff" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9dee2"/><stop offset=".5" stop-color="#8d969e"/><stop offset="1" stop-color="#c3c9ce"/></linearGradient>
+      <linearGradient id="qOff${n}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9dee2"/><stop offset=".5" stop-color="#8d969e"/><stop offset="1" stop-color="#c3c9ce"/></linearGradient>
       <radialGradient id="hub${n}" cx="40%" cy="32%" r="75%"><stop offset="0" stop-color="#ffffff"/><stop offset=".45" stop-color="#b9c0c6"/><stop offset="1" stop-color="#4f575e"/></radialGradient>
       <radialGradient id="gem${n}" cx="38%" cy="30%" r="75%"><stop offset="0" stop-color="#e6ffb0"/><stop offset=".4" stop-color="#7fd11a"/><stop offset="1" stop-color="#0c560c"/></radialGradient>
     </defs>
-    ${QUADS.map(([a, b]) => `<path class="qbg" d="${arc(40, 40, 31, a, b)}"/>`).join('')}
-    ${QUADS.map(([a, b], i) => `<path class="q${lit.includes(i) ? ' on' : ''}${me === i ? ' me' : ''}" data-q="${i}" d="${arc(40, 40, 31, a, b)}"/>`).join('')}
+    ${QUADS.map(([a, b]) => `<path class="qbg" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="15" d="${arc(40, 40, 31, a, b)}"/>`).join('')}
+    ${QUADS.map(([a, b], i) => `<path class="q${lit.includes(i) ? ' on' : ''}${me === i ? ' me' : ''}" data-q="${i}" fill="none" stroke="url(#qOff${n})" stroke-width="11" d="${arc(40, 40, 31, a, b)}"/>`).join('')}
     <circle cx="40" cy="40" r="20" fill="url(#hub${n})" stroke="rgba(0,0,0,.45)" stroke-width="1.2"/>
     <circle cx="40" cy="40" r="13" fill="url(#gem${n})"/>
     <path d="M33 37 A8 8 0 0 1 47 37" stroke="#f2ffd9" stroke-width="2.4" fill="none" stroke-linecap="round" opacity=".85"/>

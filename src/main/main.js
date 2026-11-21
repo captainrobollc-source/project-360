@@ -321,7 +321,12 @@ function inputTarget() {
   return null;
 }
 
+// Scripted test runs (P360_SCRIPT) ignore real controllers, so a pad in use on this PC can't
+// steer the test, and the test can't react to someone playing. P360_PADS=1 opts back in.
+const IGNORE_PADS = !!process.env.P360_SCRIPT && !process.env.P360_PADS;
+
 native.on('in', ({ s, b }) => {
+  if (IGNORE_PADS) return;
   const prev = masks[s] || 0;
   masks[s] = b;
   const pressed = b & ~prev;
@@ -339,7 +344,7 @@ native.on('in', ({ s, b }) => {
   if (h && h.pad) h.pad(b & ~(1 << 10));
 });
 
-native.on('guide', ({ s }) => onGuide(s));
+native.on('guide', ({ s }) => { if (!IGNORE_PADS) onGuide(s); });
 
 native.on('pad', ({ s, c }) => {
   if (!pads[s]) return;
@@ -350,11 +355,11 @@ native.on('pad', ({ s, c }) => {
   broadcastSlots();
   if (c && !was) {
     const who = profileById(slotProfiles[s]);
-    toast({ kind: 'controller', slot: s, title: who ? `${who.gamertag}'s controller connected` : 'Controller connected', text: who || !signedIn ? `Player ${s + 1}` : `Player ${s + 1} · press the Xbox button to sign in`, sound: 'toast' });
+    toast({ kind: 'controller', slot: s, lit: pads.filter((p) => p.connected).map((p) => p.slot), title: who ? `${who.gamertag}'s controller connected` : 'Controller connected', text: who || !signedIn ? `Player ${s + 1}` : `Player ${s + 1} · press the Xbox button to sign in`, sound: 'toast' });
     native.call('pad.rumble', s, 22000, 22000, 160).catch(() => {});
     native.call('pad.battery').catch(() => {});
   } else if (!c && was) {
-    toast({ kind: 'controller', slot: s, title: 'Controller disconnected', text: `Player ${s + 1} · reconnect to continue`, sound: 'back' });
+    toast({ kind: 'controller', slot: s, lit: pads.filter((p) => p.connected).map((p) => p.slot), title: 'Controller disconnected', text: `Player ${s + 1} · reconnect to continue`, sound: 'back' });
   }
 });
 

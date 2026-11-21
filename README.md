@@ -369,7 +369,7 @@ The renderer is a fixed 1920×1080 stage scaled to the screen, so the layout loo
 
 ## Dev testing
 
-`npm run dev` with `P360_SCRIPT=steps.json` drives the UI headlessly and takes screenshots. Add `P360_USERDATA=<folder>` to use an isolated data folder (your real profile and achievements are untouched, and it can run beside a normal instance):
+`npm run dev` with `P360_SCRIPT=steps.json` drives the UI headlessly and takes screenshots. Scripted runs ignore real controllers (set `P360_PADS=1` to use them). Add `P360_USERDATA=<folder>` to use an isolated data folder (your real profile and achievements are untouched, and it can run beside a normal instance):
 
 ```json
 [{ "wait": 3000 }, { "action": "rb" }, { "shot": "games.png" }, { "guide": true }, { "quit": true }]

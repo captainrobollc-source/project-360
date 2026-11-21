@@ -7,8 +7,10 @@ let promptsEl = null;
 
 export function mountPrompts(el) { promptsEl = el; refreshPrompts(); }
 
+let pushedAt = 0;
 export function push(layer) {
   stack.push(layer);
+  pushedAt = performance.now(); // a new screen/popup: its first focus belongs to the controller
   refreshPrompts();
   return layer;
 }
@@ -184,10 +186,20 @@ export function initMouse() {
   });
   // Only follow the pointer when it actually moved; elements sliding under a resting
   // cursor (blade transitions) must not steal focus from the controller.
+  // Chromium also sends mousemove when content appears under a resting cursor; only a real change
+  // of position counts. And a popup that just opened keeps its own initial focus for a moment.
   let movedAt = 0;
-  document.addEventListener('mousemove', () => { movedAt = performance.now(); }, { passive: true });
+  let lastX = -1;
+  let lastY = -1;
+  document.addEventListener('mousemove', (e) => {
+    if (e.screenX === lastX && e.screenY === lastY) return;
+    lastX = e.screenX;
+    lastY = e.screenY;
+    movedAt = performance.now();
+  }, { passive: true });
   document.addEventListener('mouseover', (e) => {
-    if (performance.now() - movedAt > 120) return;
+    const now = performance.now();
+    if (now - movedAt > 120 || now - pushedAt < 600) return;
     const el = e.target.closest('[data-focus]');
     const layer = top();
     if (!el || !layer || !layer.focus || !layer.focus.root.contains(el)) return;

@@ -10,8 +10,10 @@ function iconFor(t) {
   if (t.kind === 'achievement') return h('div.ticon', {}, h('div.trophy', { html: icon('trophy') }));
   if (t.kind === 'signin') return h('div.ticon', {}, avatar(t.avatar || 0));
   if (t.kind === 'controller' || t.kind === 'battery') {
-    const lit = store.state.pads.filter((p) => p.connected).map((p) => p.slot);
-    return h('div.ticon', { html: ringSvg(lit, t.slot ?? -1, 'ringsvg') });
+    // main sends which controllers are connected (the renderer's list can lag at startup)
+    const lit = Array.isArray(t.lit) ? t.lit : store.state.pads.filter((p) => p.connected).map((p) => p.slot);
+    const me = lit.includes(t.slot) ? t.slot : -1; // a disconnected controller's quadrant stays dark
+    return h('div.ticon', { html: ringSvg(lit, me, 'ringsvg') });
   }
   const o = orb('fast');
   const wrap = h('div.ticon', {}, o);

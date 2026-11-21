@@ -1,7 +1,7 @@
 {
   "name": "project-360",
   "productName": "Project 360",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Controller-first, 10-foot console dashboard and game launcher for Windows, inspired by the Xbox 360 blades/NXE era.",
   "main": "src/main/main.js",
   "private": true,

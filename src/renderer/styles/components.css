@@ -32,10 +32,12 @@
 /* ---------- Ring of Light ---------- */
 .ring { display: flex; align-items: center; gap: 14px; }
 .ring .ringsvg { width: 74px; height: 74px; overflow: visible; filter: drop-shadow(0 3px 6px rgba(0,0,0,.45)); }
-.ring .q { fill: none; stroke: url(#qOff); stroke-width: 11; stroke-linecap: butt; transition: stroke 300ms ease, filter 300ms; }
-.ring .qbg { fill: none; stroke: rgba(0,0,0,.55); stroke-width: 15; }
-.ring .q.on { stroke: #5fc01f; }
-.ring .q.me { stroke: #b8f05a; filter: drop-shadow(0 0 6px rgba(155,230,60,1)); animation: ringPulse 2.2s ease-in-out infinite; }
+/* Quadrants: unlit ones use the gradient set on each path; these are the lit states, for every ring
+   (header, Guide, toasts). */
+.ringsvg .q { stroke-linecap: butt; transition: stroke 300ms ease, filter 300ms; }
+.ringsvg .q.on { stroke: #5fc01f; }
+.ringsvg .q.me { stroke: #b8f05a; filter: drop-shadow(0 0 6px rgba(155,230,60,1)); animation: ringPulse 2.2s ease-in-out infinite; }
+.ticon .ringsvg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 3px 6px rgba(0,0,0,.45)); }
 @keyframes ringPulse { 50% { filter: drop-shadow(0 0 12px rgba(170,240,70,1)); } }
 .ring .meta { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; color: var(--header-ink); }
 .ring .pl { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
