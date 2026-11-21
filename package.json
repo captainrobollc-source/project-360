@@ -29,7 +29,7 @@
         "provider": "github",
         "owner": "captainrobollc-source",
         "repo": "project-360",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "files": [

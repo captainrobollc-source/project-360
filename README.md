@@ -272,7 +272,9 @@ To publish releases:
    is unsigned, and Windows SmartScreen will show "Windows protected your PC" on first install
    (More info › Run anyway). Updates still work.
 
-To publish from your own PC instead: `$env:GH_TOKEN = "<token>"` then `npm run release`.
+To publish from your own PC instead: `$env:GH_TOKEN = "<token>"`, then `npm run release`. That
+uploads to a **draft** release; publish it on GitHub (or `gh release edit vX.Y.Z --draft=false`)
+so installed apps can see it.
 
 ## Console shell mode (boot straight into Project 360)
 

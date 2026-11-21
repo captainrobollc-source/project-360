@@ -1,8 +1,8 @@
 # Builds the Windows installer and publishes it as a GitHub release.
 # Installed copies of Project 360 check these releases and update themselves.
 #
-#   1. Bump "version" in package.json, commit.
-#   2. git tag v0.2.0 && git push --tags
+#   1. Bump "version" in package.json, commit, push.
+#   2. git tag v0.2.0   then   git push origin v0.2.0
 #
 # Code signing (optional but recommended — removes the SmartScreen warning):
 #   add repository secrets WINDOWS_CERT_BASE64 (your .pfx, base64-encoded) and
@@ -12,7 +12,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -20,10 +19,13 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -33,13 +35,25 @@ jobs:
       # The native helper compiles with the C# compiler that ships with Windows.
       - run: npm run build:native
 
+      # Create the draft release up front. electron-builder uploads files in parallel, and if the
+      # release doesn't exist yet each upload creates its own copy.
+      - name: Create draft release
+        shell: pwsh
+        run: |
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -ne 0) { gh release create $env:TAG --draft --title $env:TAG.TrimStart('v') --generate-notes --verify-tag }
+
       # Without signing secrets, drop the empty values so the build is simply unsigned.
-      - name: Build and publish installer
+      - name: Build and upload installer
         shell: pwsh
         run: |
           if (-not $env:CSC_LINK) { Remove-Item Env:CSC_LINK, Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue }
           npx electron-builder --win nsis --publish always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+
+      # Installed apps only see published releases.
+      - name: Publish release
+        shell: pwsh
+        run: gh release edit $env:TAG --draft=false
