@@ -52,14 +52,18 @@ async function power(action) {
   }
 }
 
-function getStartup() {
+// Windows matches the Run entry by path *and* args, so set and get must use the same args.
+function startupItem() {
   const [exe, ...args] = appLaunchArgs();
-  return app.getLoginItemSettings({ path: exe, args }).openAtLogin;
+  return { path: exe, args: [...args, '--startup'] };
+}
+
+function getStartup() {
+  return app.getLoginItemSettings(startupItem()).openAtLogin;
 }
 
 function setStartup(enabled) {
-  const [exe, ...args] = appLaunchArgs();
-  app.setLoginItemSettings({ openAtLogin: !!enabled, path: exe, args: [...args, '--startup'] });
+  app.setLoginItemSettings({ openAtLogin: !!enabled, ...startupItem() });
   return getStartup();
 }
 

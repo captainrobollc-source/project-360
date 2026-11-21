@@ -1,6 +1,6 @@
 // Modal layers: generic modal, confirm dialog, option menu, on-screen keyboard.
 import { h } from '../util.js';
-import { iconEl } from '../icons.js';
+import { iconEl, avatar, AVATARS } from '../icons.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
 import { captureKeys } from '../input.js';
@@ -84,6 +84,29 @@ export function confirm({ title, text, buttons, cls = '' }) {
 
 export function menu({ title, items }) {
   return confirm({ title, buttons: items, cls: 'popmenu' });
+}
+
+// Gamer picture grid. Resolves to the chosen index, or null on Back.
+export function avatarPicker({ title = 'Choose a gamer picture', current = 0 } = {}) {
+  return new Promise((resolve) => {
+    modal({
+      panelClass: 'dialog avpick',
+      prompts: () => [{ btn: 'a', label: 'Choose' }, { btn: 'b', label: 'Back' }],
+      onClose: (v) => resolve(v === undefined ? null : v),
+      build(panel, close, focus) {
+        const grid = h('div.avgrid');
+        AVATARS.forEach((_, i) => {
+          const cell = h('div.avcell', { 'data-focus': '' }, avatar(i));
+          cell._activate = () => close(i);
+          if (i === current) cell.classList.add('current');
+          grid.append(cell);
+        });
+        panel.append(h('h3', {}, title), grid);
+        const cur = grid.children[current] || grid.children[0];
+        if (cur) focus.set(cur);
+      },
+    });
+  });
 }
 
 // ------------------------------------------------------------------ on-screen keyboard

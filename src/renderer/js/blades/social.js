@@ -4,7 +4,7 @@ import { avatar, AVATARS, icon, orb } from '../icons.js';
 import * as sound from '../sound.js';
 import { state, setting, saveSetting, visibleGames, gameById } from '../store.js';
 import { createSplit } from './split.js';
-import { button, osk } from '../components/modal.js';
+import { button, osk, avatarPicker } from '../components/modal.js';
 
 export function socialBlade(ctx) {
   let friends = null;
@@ -27,10 +27,11 @@ export function socialBlade(ctx) {
       const games = visibleGames();
       const total = games.reduce((s, g) => s + (g.playtime || 0), 0);
       const t = state.achievements.totals;
-      const pic = button('Change gamer picture', { icon: 'image', right: '◀ ▶' });
-      const cycle = async (d) => { sound.play('tick'); await saveSetting('profile.avatar', ((p.avatar || 0) + d + AVATARS.length) % AVATARS.length); split.rerender(); };
-      pic._activate = () => cycle(1);
-      pic._adjust = cycle;
+      // A opens a picker; left/right just move between the three buttons in this row.
+      const pic = button('Change gamer picture', { icon: 'image', onActivate: async () => {
+        const v = await avatarPicker({ current: p.avatar || 0 });
+        if (v !== null && v !== (p.avatar || 0)) { await saveSetting('profile.avatar', v); split.rerender(); }
+      } });
       const tag = button('Change gamertag', { icon: 'user', onActivate: async () => { const v = await osk({ title: 'Gamertag', value: p.gamertag, maxLength: 15 }); if (v && v.trim()) { await saveSetting('profile.gamertag', v.trim()); split.rerender(); } } });
       const motto = button('Edit motto', { icon: 'info', onActivate: async () => { const v = await osk({ title: 'Motto', value: p.motto, maxLength: 40 }); if (v !== null) { await saveSetting('profile.motto', v.trim()); split.rerender(); } } });
       const played = games.filter((g) => g.playtime > 0).sort((a, b) => b.playtime - a.playtime);
