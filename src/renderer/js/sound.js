@@ -170,3 +170,19 @@ export function play(name, opts = {}) {
     (SYNTH[name] || SYNTH.tick)(t, opts);
   } catch (e) { /* audio is best-effort */ }
 }
+
+// Game sound effects for the built-in arcade: a list of voices played together.
+//   { tone: freq, to?, type?, peak?, attack?, decay?, pan?, at? }  or  { noise: true, from, peakAt, to, dur, q, peak, at? }
+export function sfx(voices) {
+  if (!enabled) return;
+  try {
+    ensure();
+    if (ctx.state === 'suspended') ctx.resume();
+    const t0 = ctx.currentTime + 0.003;
+    for (const v of [].concat(voices)) {
+      const t = t0 + (v.at || 0);
+      if (v.noise) noiseBurst(t, v);
+      else tone(v.tone, t, v);
+    }
+  } catch (e) { /* audio is best-effort */ }
+}

@@ -123,6 +123,10 @@ contextBridge.exposeInMainWorld('p360', {
     toastsIdle: () => call('overlay:toastsIdle'),
   },
   app: { quit: () => call('app:quit'), relaunch: () => call('app:relaunch') },
+  arcade: {
+    board: (key) => call('arcade:board', key),
+    finish: (key, result) => call('arcade:finish', key, result),
+  },
   logs: { tail: () => call('logs:tail'), open: () => call('logs:open'), error: (msg) => call('renderer:error', msg) },
   backups: {
     list: () => call('backups:list'),

@@ -36,6 +36,18 @@ const DEFS = [
   { id: 'weekend-warrior', title: 'Weekend Warrior', desc: 'Play on a Saturday and the Sunday after.', points: 20, icon: 'flame' },
   { id: 'daily-dose', title: 'Daily Dose', desc: 'Play on 7 different days.', points: 30, icon: 'flame' },
   { id: 'clean-slate', title: 'Clean Slate', desc: 'Hide a game you never play.', points: 5, icon: 'eyeoff' },
+  // Built-in arcade
+  { id: 'arcade-rat', title: 'Arcade Rat', desc: 'Play all three arcade games.', points: 15, icon: 'controller' },
+  { id: 'top-of-the-board', title: 'Top of the Board', desc: 'Take first place on an arcade leaderboard.', points: 15, icon: 'crown' },
+  { id: 'pulse-50k', title: 'Pulse Check', desc: 'Pulse Arena: score 50,000 points.', points: 20, icon: 'bolt' },
+  { id: 'pulse-wave10', title: 'Ring Master', desc: 'Pulse Arena: reach wave 10.', points: 25, icon: 'bolt' },
+  { id: 'pulse-nobomb', title: 'Steady Hands', desc: 'Pulse Arena: reach wave 5 without using a bomb.', points: 20, icon: 'bolt' },
+  { id: 'prism-level5', title: 'Glass Cutter', desc: 'Prism Breaker: clear level 5.', points: 25, icon: 'star' },
+  { id: 'prism-perfect', title: 'Flawless Prism', desc: 'Prism Breaker: clear a level without dropping a ball.', points: 20, icon: 'star' },
+  { id: 'prism-multiball', title: 'Light Show', desc: 'Prism Breaker: have 5 balls in play at once.', points: 15, icon: 'star' },
+  { id: 'glow-20k', title: 'Bright Idea', desc: 'Glow Link: score 20,000 in one Blitz.', points: 20, icon: 'trophy' },
+  { id: 'glow-cascade', title: 'Chain Reaction', desc: 'Glow Link: set off a 5-step cascade.', points: 20, icon: 'trophy' },
+  { id: 'glow-nova', title: 'Supernova', desc: 'Glow Link: make a Nova orb by matching five.', points: 15, icon: 'trophy' },
 ];
 const BLADES = ['marketplace', 'social', 'home', 'games', 'retro', 'media', 'system'];
 const DEF = Object.fromEntries(DEFS.map((d) => [d.id, d]));
@@ -123,6 +135,25 @@ class Achievements extends EventEmitter {
       case 'media': this.unlock('couch-potato'); break;
       case 'guide': this.unlock('guided'); break;
       case 'hide': if (!data.playtime) this.unlock('clean-slate'); break;
+      case 'arcade': {
+        const x = data.stats || {};
+        if ((data.played || []).length >= (data.total || 3)) this.unlock('arcade-rat');
+        if (data.top) this.unlock('top-of-the-board');
+        if (data.game === 'pulse') {
+          if (data.score >= 50000) this.unlock('pulse-50k');
+          if ((x.wave || 0) >= 10) this.unlock('pulse-wave10');
+          if (x.noBombWave >= 5) this.unlock('pulse-nobomb');
+        } else if (data.game === 'prism') {
+          if ((x.levelsCleared || 0) >= 5) this.unlock('prism-level5');
+          if (x.perfectLevels > 0) this.unlock('prism-perfect');
+          if ((x.maxBalls || 0) >= 5) this.unlock('prism-multiball');
+        } else if (data.game === 'glow') {
+          if (data.score >= 20000) this.unlock('glow-20k');
+          if ((x.maxCascade || 0) >= 5) this.unlock('glow-cascade');
+          if ((x.novas || 0) > 0) this.unlock('glow-nova');
+        }
+        break;
+      }
       default: break;
     }
   }

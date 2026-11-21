@@ -64,7 +64,7 @@ export function gamesBlade(ctx) {
 
   function renderShelves() {
     const sources = [...new Set(state.library.map((g) => g.source))];
-    const chips = [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
+    const chips = [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['arcade', 'steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
     if (!chips.some(([k]) => k === filter)) filter = 'all';
     const focusedChip = focus.current && focus.current.dataset.chip;
     shelves.replaceChildren();

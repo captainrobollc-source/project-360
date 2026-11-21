@@ -6,6 +6,7 @@ import * as nav from '../nav.js';
 import * as sound from '../sound.js';
 import { gameById, state, setting } from '../store.js';
 import { getRoot } from './modal.js';
+import { isArcade, playArcade } from '../arcade/index.js';
 import * as music from './music.js';
 
 let splash = null;
@@ -56,6 +57,7 @@ export function hideSplash(immediate = false) {
 export async function launchGame(id) {
   const g = gameById(id);
   if (!g) return;
+  if (isArcade(g)) { sound.play('launch'); playArcade(g.id); return; } // runs inside the dashboard
   if (state.launcher.phase !== 'idle') {
     toastFn({ title: `${state.launcher.title} is running`, text: 'Close it from the Guide first', sound: 'error' });
     return;

@@ -46,9 +46,13 @@ export function fmtAgo(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-export const SOURCE_LABEL = { steam: 'Steam', epic: 'Epic', gog: 'GOG', xbox: 'Xbox', local: 'Local', rom: 'Retro' };
+export const SOURCE_LABEL = { steam: 'Steam', epic: 'Epic', gog: 'GOG', xbox: 'Xbox', local: 'Local', rom: 'Retro', arcade: 'Arcade' };
+
+// Art drawn in the renderer (built-in arcade games): "<id>|<kind>" → data URL.
+export const generatedArt = new Map();
 
 export function artUrl(game, kind) {
+  if (game && generatedArt.has(`${game.id}|${kind}`)) return generatedArt.get(`${game.id}|${kind}`);
   if (!game || !game.art || !game.art[kind]) return null;
   return `p360://art/${encodeURIComponent(game.id)}/${kind}?v=${game.art[kind]}`;
 }

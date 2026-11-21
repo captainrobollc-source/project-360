@@ -10,6 +10,7 @@ import { createToasts } from './components/toast.js';
 import { createGuide } from './components/guide.js';
 import { setToast, onLauncherState, hideSplash, onReveal, launchGame } from './components/launch.js';
 import { createDashboard } from './dashboard.js';
+import { initArcadeArt } from './arcade/index.js';
 import { playBoot, signIn, runSetup, createSaver } from './screens.js';
 
 const mode = new URLSearchParams(location.search).get('mode') || 'dashboard';
@@ -92,6 +93,7 @@ async function boot() {
   } else {
     const first = !init.signedIn;
     if (first && store.setting('console.bootAnimation')) document.body.classList.add('entering');
+    initArcadeArt(); // built-in games draw their own library art
     dashboard = createDashboard(stage, { toast, guide, signIn: doSignIn });
     stage.querySelector('.prompts').style.zIndex = 85;
     window.p360.on('guide:toggle', (d) => guide.toggle(d && d.slot));

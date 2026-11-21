@@ -89,7 +89,7 @@ class Library extends EventEmitter {
             ...g,
             addedAt: prev.addedAt || Date.now(),
             art: prev.art || {},
-            meta: prev.meta || null,
+            meta: prev.meta || g.meta || null,
             artTried: prev.artTried || 0,
             artVersion: prev.artVersion,
             artSources: prev.artSources,

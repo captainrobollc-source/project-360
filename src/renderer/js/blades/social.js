@@ -5,6 +5,7 @@ import * as sound from '../sound.js';
 import { state, setting, saveSetting, visibleGames, gameById } from '../store.js';
 import { createSplit } from './split.js';
 import { button, osk, avatarPicker } from '../components/modal.js';
+import { openAvatarEditor } from '../avatar/editor.js';
 
 export function socialBlade(ctx) {
   let friends = null;
@@ -33,6 +34,7 @@ export function socialBlade(ctx) {
         if (v !== null && v !== (p.avatar || 0)) { await saveSetting('profile.avatar', v); split.rerender(); }
       } });
       const tag = button('Change gamertag', { icon: 'user', onActivate: async () => { const v = await osk({ title: 'Gamertag', value: p.gamertag, maxLength: 15 }); if (v && v.trim()) { await saveSetting('profile.gamertag', v.trim()); split.rerender(); } } });
+      const avatarBtn = button('Edit avatar', { icon: 'user', onActivate: () => openAvatarEditor({ toast: ctx.toast }) });
       const motto = button('Edit motto', { icon: 'info', onActivate: async () => { const v = await osk({ title: 'Motto', value: p.motto, maxLength: 40 }); if (v !== null) { await saveSetting('profile.motto', v.trim()); split.rerender(); } } });
       const played = games.filter((g) => g.playtime > 0).sort((a, b) => b.playtime - a.playtime);
       const max = played[0] ? played[0].playtime : 1;
@@ -46,7 +48,7 @@ export function socialBlade(ctx) {
           h('div.stat', {}, h('div.v', {}, fmtPlaytime(total)), h('div.k', {}, 'Time played')),
           h('div.stat', {}, h('div.v', {}, `${t.unlocked}/${t.count}`), h('div.k', {}, 'Achievements')),
           h('div.stat', {}, h('div.v', {}, String(games.reduce((s, g) => s + (g.launches || 0), 0))), h('div.k', {}, 'Sessions'))),
-        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(max-content, 1fr))', gap: '12px' } }, pic, tag, motto)));
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(max-content, 1fr))', gap: '12px' } }, avatarBtn, pic, tag, motto)));
       pane.append(h('h2', { style: { marginTop: '28px' } }, 'most played'), h('div.bars', {}, ...(played.length ? played.slice(0, 6).map((g) => h('div.bar-row', {},
         h('div.n', {}, g.title), h('div.trk', {}, h('div.fill', { style: { width: `${Math.max(3, (g.playtime / max) * 100)}%` } })), h('div.v', {}, fmtPlaytime(g.playtime)))) : [h('div.empty-note', {}, 'Play something and your stats show up here.')])));
     },

@@ -81,6 +81,7 @@ class ArtManager extends EventEmitter {
     const now = Date.now();
     let dirty = false;
     for (const g of Object.values(this.library.games())) {
+      if (g.source === 'arcade') continue; // built-in games draw their own art
       const old = this.artVersionOf(g) < ART_VERSION;
       // Drop cached placeholders (e.g. Steam's grey stand-ins) so they get re-fetched.
       for (const k of KINDS) {
@@ -259,7 +260,7 @@ class ArtManager extends EventEmitter {
 
   async process({ id, force }) {
     const g = this.library.game(id);
-    if (!g) return;
+    if (!g || g.source === 'arcade') return;
     // Offline (e.g. Wi-Fi not up yet at boot): don't record "tried, nothing found" for 3 days,
     // and never let a forced refresh replace good art with nothing. The next scan retries.
     if (!online()) return;

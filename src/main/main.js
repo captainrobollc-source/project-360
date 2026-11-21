@@ -91,6 +91,8 @@ const art = new ArtManager(path.join(USER, 'art'), library, settings, findSteamR
 const emulation = new Emulation({ userDir: USER, settings });
 library.registerScanner('emulation', emulation);
 const achievements = new Achievements(() => library.profileData(), () => library.user.save());
+const arcade = require('./arcade').create({ settings, library, achievements, profiles: () => settings.get('profiles') || [] });
+library.registerScanner('arcade', arcade.scanner);
 // ------------------------------------------------------------------ per-controller profiles
 // Each controller slot can have its own signed-in profile. The controller in use decides whose
 // dashboard it is (favorites, gamer card, achievements); games credit whoever launched them.
@@ -117,6 +119,7 @@ function slotsView() {
       profileId: prof ? prof.id : null,
       gamertag: prof ? prof.gamertag : null,
       avatar: prof ? prof.avatar : 0,
+      avatar3d: prof ? prof.avatar3d || null : null,
       score: prof ? withProfile(prof.id, () => achievements.score()) : 0,
       active: !!prof && prof.id === active,
     };
@@ -575,9 +578,18 @@ function handle(ch, fn) {
 handle('app:init', (e, mode) => initPayload(mode));
 handle('library:get', () => library.view());
 handle('library:rescan', async () => maybeRescan(true));
+// ---- Built-in arcade (the games run inside the dashboard renderer)
+handle('arcade:board', (e, key) => arcade.board(key));
+handle('arcade:finish', (e, key, result) => {
+  const res = arcade.finish(key, result, settings.get('activeProfile'));
+  broadcast('library:updated', library.view ? library.view() : undefined);
+  return res;
+});
+
 handle('game:launch', async (e, id) => {
   const g = library.game(id);
   if (!g) throw new Error('Game not found');
+  if (g.source === 'arcade') throw new Error('ARCADE'); // the renderer runs these itself
   if (g.systemId) {
     // Emulated game: make sure its emulator / core is there (cores install on demand).
     g.launch = emulation.relaunchInfo(g);
@@ -632,6 +644,7 @@ handle('settings:set', async (e, key, value) => {
     if (field === 'avatar' && p.avatar !== value) achievements.track('avatar');
     p[field] = value;
     settings.save();
+    if (['avatar', 'avatar3d', 'gamertag'].includes(field)) broadcastSlots(); // other players' views of this profile
   } else {
     settings.set(key, value);
   }

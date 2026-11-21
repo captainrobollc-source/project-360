@@ -264,7 +264,7 @@ export function createSaver(stage) {
   function show() {
     if (el || store.state.suspended || !minutes()) return;
     // Watching a video or slideshow: not idle. Check again later.
-    if (document.body.classList.contains('viewer-open')) { timer = setTimeout(show, 60000); return; }
+    if (document.body.classList.contains('viewer-open') || document.body.classList.contains('arcade-open')) { timer = setTimeout(show, 60000); return; }
     const o = orb();
     const clock = h('div.sclock');
     el = h('div.saver', {}, o, clock);
