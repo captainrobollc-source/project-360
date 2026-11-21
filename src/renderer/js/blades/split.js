@@ -56,6 +56,8 @@ export function createSplit({ sections, render, onSection }) {
 
   function rerender() {
     const idx = focus.current && inPane(focus.current) ? paneItems().indexOf(focus.current) : -1;
+    // Rows with a stable data-key (tracks, networks, devices) keep focus even if rows above change.
+    const key = idx >= 0 ? focus.current.dataset.key : undefined;
     const scrollTop = pane.firstChild ? pane.firstChild.scrollTop : 0;
     const my = ++token;
     const scroll = makeScroll();
@@ -66,7 +68,7 @@ export function createSplit({ sections, render, onSection }) {
       renderList();
       if (idx >= 0) {
         const items = paneItems();
-        const t = items[Math.min(idx, items.length - 1)];
+        const t = (key !== undefined && items.find((e) => e.dataset.key === key)) || items[Math.min(idx, items.length - 1)];
         if (t) focus.set(t); else { const it = listItem(); if (it) focus.set(it); }
       }
       nav.refreshPrompts();

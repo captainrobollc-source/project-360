@@ -143,24 +143,44 @@ class Emulation extends EventEmitter {
   }
 
   // ------------------------------------------------------------------ downloads / extraction
+  // Downloads to "<dest>.part" and renames only when complete, so a dropped connection or a full
+  // disk never leaves a truncated file that later passes an existsSync() check.
   async download(url, dest, id) {
-    const res = await fetch(url, { headers: { 'User-Agent': 'Project360' }, redirect: 'follow' });
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const total = Number(res.headers.get('content-length')) || 0;
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    const out = fs.createWriteStream(dest);
-    let received = 0;
-    let last = 0;
+    const ctrl = new AbortController();
+    let idle = setTimeout(() => ctrl.abort(), 60000); // no data for a minute: give up
+    const bump = () => { clearTimeout(idle); idle = setTimeout(() => ctrl.abort(), 60000); };
+    const part = `${dest}.part`;
     try {
-      for await (const chunk of res.body) {
-        received += chunk.length;
-        if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
-        if (id && Date.now() - last > 300) { last = Date.now(); this.setProgress(id, { phase: 'downloading', received, total }); }
+      const res = await fetch(url, { headers: { 'User-Agent': 'Project360' }, redirect: 'follow', signal: ctrl.signal });
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const total = Number(res.headers.get('content-length')) || 0;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const out = fs.createWriteStream(part);
+      let failed = null;
+      out.on('error', (e) => { failed = e; ctrl.abort(); });
+      let received = 0;
+      let last = 0;
+      try {
+        for await (const chunk of res.body) {
+          if (failed) break;
+          bump();
+          received += chunk.length;
+          if (!out.write(chunk)) await new Promise((r) => { out.once('drain', r); out.once('error', r); });
+          if (id && Date.now() - last > 300) { last = Date.now(); this.setProgress(id, { phase: 'downloading', received, total }); }
+        }
+      } finally {
+        await new Promise((r) => { if (out.destroyed) r(); else out.end(r); });
       }
+      if (failed) throw failed;
+      if (total && received < total) throw new Error('Download was interrupted');
+      fs.renameSync(part, dest);
+      return dest;
+    } catch (e) {
+      try { fs.unlinkSync(part); } catch { /* not created */ }
+      throw ctrl.signal.aborted && !(e && e.code) ? new Error('Download stalled; check your connection and try again') : e;
     } finally {
-      await new Promise((r) => out.end(r));
+      clearTimeout(idle);
     }
-    return dest;
   }
 
   async sevenZip() {
@@ -299,6 +319,18 @@ class Emulation extends EventEmitter {
       try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
       const names = entries.map((e) => e.name.toLowerCase());
       const hasCue = names.some((n) => n.endsWith('.cue') || n.endsWith('.m3u') || n.endsWith('.gdi'));
+      // Multi-disc games: an .m3u playlist stands for its discs, so the discs it lists (and, with
+      // a playlist present, loose disc images) aren't separate games.
+      const inPlaylist = new Set();
+      const m3us = entries.filter((e) => e.isFile() && /\.m3u$/i.test(e.name));
+      for (const m of m3us) {
+        try {
+          for (const line of fs.readFileSync(path.join(d, m.name), 'utf8').split(/\r?\n/)) {
+            const t = line.trim();
+            if (t && !t.startsWith('#')) inPlaylist.add(path.basename(t).toLowerCase());
+          }
+        } catch { /* unreadable playlist */ }
+      }
       for (const e of entries) {
         const f = path.join(d, e.name);
         if (e.isDirectory()) {
@@ -317,6 +349,7 @@ class Emulation extends EventEmitter {
         const ext = path.extname(e.name).slice(1).toLowerCase();
         if (!exts.has(ext)) continue;
         if (hasCue && (ext === 'bin' || ext === 'iso') && ['psx', 'segacd', 'saturn', 'pce', 'dreamcast'].includes(sys.id)) continue; // tracks of a .cue/.m3u
+        if (ext !== 'm3u' && (inPlaylist.has(e.name.toLowerCase()) || (m3us.length && /\((disc|disk|cd) ?\d+\)/i.test(e.name)))) continue;
         out.push({ file: f, title: titleFrom(e.name) });
       }
     };

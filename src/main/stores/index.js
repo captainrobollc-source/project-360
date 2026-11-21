@@ -355,7 +355,14 @@ class StoreManager extends EventEmitter {
   async installNow(id) {
     const j = this.jobs().find((x) => x.id === id);
     if (!j || !['downloaded', 'failed'].includes(j.state) || !j.files.every((f) => f.done)) throw new Error('Nothing to install yet');
-    await this.installJob(j);
+    try { await this.installJob(j); } catch (e) {
+      // Like pump(): a declined UAC prompt or a failed installer leaves the job retryable,
+      // never stuck in "installing" (which would also re-run the installer at the next start).
+      j.state = 'failed';
+      j.error = e.message;
+      this.changed(true);
+      throw e;
+    }
     this.changed(true);
   }
 

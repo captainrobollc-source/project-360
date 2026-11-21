@@ -1,6 +1,7 @@
 ' Project 360 shell launcher (used when "Console shell mode" replaces explorer.exe).
 ' Runs the dashboard and guarantees a way back to Windows:
 '   exit code 65 -> relaunch the dashboard (restart / restore backup)
+'   exit code 66 -> an update is installing: wait for the installer, then relaunch
 '   exit code 64 -> user chose "Exit to Windows Desktop" (explorer already started)
 '   exit code 0  -> normal quit: start explorer.exe
 '   anything else -> crash (or a hang the watchdog killed): relaunch, up to 3 times in
@@ -25,7 +26,12 @@ ReDim crashes(0)
 Do
   rc = sh.Run(cmd, 1, True)
   If rc = 65 Then
-    ' restart requested
+    ' restart requested (not a crash recovery)
+    cmd = Replace(cmd, " --recovered", "")
+  ElseIf rc = 66 Then
+    ' update: the silent installer replaces the files, then we start the new version
+    cmd = Replace(cmd, " --recovered", "")
+    WScript.Sleep 25000
   ElseIf rc = 64 Then
     WScript.Quit 0
   ElseIf rc = 0 Then

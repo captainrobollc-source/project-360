@@ -3,7 +3,7 @@
 const BASE = 'https://www.humblebundle.com';
 // Electron's session fetch throws on a refused redirect (signed-out pages redirect to login).
 async function get(ses, url) {
-  try { return await ses.fetch(url, { redirect: 'manual' }); }
+  try { return await ses.fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); }
   catch (e) { if (/redirect/i.test(e.message)) return { status: 302, ok: false, json: async () => ({}) }; throw e; }
 }
 
@@ -15,7 +15,7 @@ async function orders(ses) {
   const out = [];
   for (let i = 0; i < keys.length; i += 40) {
     const q = keys.slice(i, i + 40).map((k) => `gamekeys=${encodeURIComponent(k)}`).join('&');
-    const rr = await ses.fetch(`${BASE}/api/v1/orders?all_tpkds=true&${q}`);
+    const rr = await ses.fetch(`${BASE}/api/v1/orders?all_tpkds=true&${q}`, { signal: AbortSignal.timeout(20000) });
     if (!rr.ok) continue;
     const j = await rr.json();
     out.push(...Object.values(j));

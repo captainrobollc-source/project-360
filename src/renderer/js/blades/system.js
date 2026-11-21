@@ -7,6 +7,7 @@ import { confirm, osk, button, menu } from '../components/modal.js';
 import { addDevice, joinWifi, listenForPairing, bars, KIND_LABEL } from '../components/devices.js';
 import { batteryEl, batteryText } from '../components/ring.js';
 import { createSplit } from './split.js';
+import { revealInScroller } from '../nav.js';
 import { THEMES, BACKGROUNDS } from '../theme.js';
 
 // ------------------------------------------------------------------ row builders
@@ -64,6 +65,7 @@ const gb = (n) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB`
 export function systemBlade(ctx) {
   let wifiCache = null;   // { at, data } from the last Wi-Fi scan
   let wifiScanning = false;
+  let netTest = { running: false, res: null }; // last connection test, kept across re-renders
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
     ['web', 'Web & media', 'globe'], ['audio', 'Audio', 'volume'], ['controllers', 'Controllers', 'controller'],
@@ -223,10 +225,12 @@ export function systemBlade(ctx) {
       // Show the last scan right away; rescan once when the section opens.
       const fresh = wifiCache && Date.now() - wifiCache.at < 20000;
       if (!fresh && (!wifiRadio || wifiRadio.state === 'on')) {
-        if (!wifiCache) { try { wifiCache = { at: 0, data: await window.p360.wifi.list(false) }; } catch { /* shown below */ } }
+        if (!wifiCache) { try { wifiCache = { at: 0, data: await window.p360.wifi.list(false) }; } catch (e) { wifiCache = { at: Date.now(), data: { available: false, error: e.message, networks: [] } }; } }
         if (!wifiScanning) {
           wifiScanning = true;
-          window.p360.wifi.list(true).then((data) => { wifiCache = { at: Date.now(), data }; }).catch(() => {}).finally(() => {
+          // A failed scan is cached too (as "unavailable"), so it doesn't re-render and rescan in a loop.
+          window.p360.wifi.list(true).then((data) => { wifiCache = { at: Date.now(), data }; })
+            .catch((e) => { wifiCache = { at: Date.now(), data: (wifiCache && wifiCache.data) || { available: false, error: e.message, networks: [] } }; }).finally(() => {
             wifiScanning = false;
             if (split.current() === 'network') split.rerender();
           });
@@ -243,6 +247,7 @@ export function systemBlade(ctx) {
           const band = n.ghz ? (n.ghz >= 5.9 ? '6 GHz' : n.ghz >= 5 ? '5 GHz' : '2.4 GHz') : null;
           const detail = [on ? 'Connected' : null, n.secure ? 'Secured' : 'Open', band, n.saved && !on ? 'Saved' : null].filter(Boolean).join(' · ');
           const r = row(n.ssid, detail, h('div.val.wbars', {}, bars(n.bars)), on ? 'connected' : '');
+          r.dataset.key = `wifi:${n.ssid}`; // keeps focus on this network when a rescan reorders the list
           r._activate = async () => {
             if (on || n.saved) {
               const items = on ? [{ label: 'Disconnect', value: 'off', icon: 'close' }] : [{ label: 'Connect', value: 'on', icon: 'wifi' }];
@@ -269,17 +274,29 @@ export function systemBlade(ctx) {
         rows.push(actionRow('Search again', 'Look for Wi-Fi networks nearby.', () => { wifiCache = null; split.rerender(); }));
       }
 
-      const results = h('div');
+      // Test results live outside the pane so a background Wi-Fi refresh doesn't wipe them.
+      const results = h('div.nettest');
+      const paintTest = (el) => {
+        if (netTest.running) el.replaceChildren(info('Testing…', 'Network adapter · DNS · Internet · Steam · Epic · Xbox'));
+        else el.replaceChildren(...(netTest.res || []).map((r) => row(r.label, r.detail || (r.ms ? `${r.ms} ms` : ''), h(`div.check.${r.ok ? 'ok' : 'bad'}`, {}, r.ok ? '✓' : '✕'), 'info')));
+      };
+      paintTest(results);
+      const liveResults = () => (split.current() === 'network' && split.pane.querySelector('.nettest')) || null;
       const runTest = async () => {
-        results.replaceChildren(info('Testing…', 'Network adapter · DNS · Internet · Steam · Epic · Xbox'));
+        if (netTest.running) return;
+        netTest = { running: true, res: null };
+        const el = liveResults();
+        if (el) { paintTest(el); requestAnimationFrame(() => revealInScroller(el)); }
         let res = [];
         try { res = await window.p360.system.network(); } catch { /* ignore */ }
-        results.replaceChildren(...res.map((r) => row(r.label, r.detail || (r.ms ? `${r.ms} ms` : ''), h(`div.check.${r.ok ? 'ok' : 'bad'}`, {}, r.ok ? '✓' : '✕'), 'info')));
+        netTest = { running: false, res };
+        const done = liveResults();
+        if (done) { paintTest(done); requestAnimationFrame(() => revealInScroller(done)); }
         const ok = res.length && res.every((r) => r.ok);
         ctx.toast({ title: ok ? 'Connection test passed' : 'Connection problems found', sound: ok ? 'select' : 'error' });
       };
       rows.push(h('h3.sec', {}, 'connection'));
-      rows.push(actionRow('Test network connection', 'Checks your adapter, DNS, internet and game services.', runTest));
+      rows.push(actionRow('Test network connection', netTest.res ? 'Run it again to refresh the results below.' : 'Checks your adapter, DNS, internet and game services.', runTest));
       rows.push(results);
       return rows;
     },
@@ -303,6 +320,7 @@ export function systemBlade(ctx) {
       if (!paired.length) rows.push(info('No devices yet', 'Pick Add a device to pair one.'));
       for (const d of paired) {
         const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : 'Not connected'}`, h('div.val', {}, d.connected ? '●' : ''), d.connected ? 'connected' : '');
+        r.dataset.key = `bt:${d.id}`;
         r._activate = async () => {
           const pick = await menu({ title: d.name, items: [{ label: 'Remove device', value: 'remove', icon: 'close', danger: true }, { label: 'Cancel', value: null }] });
           if (pick !== 'remove') return;
@@ -322,7 +340,8 @@ export function systemBlade(ctx) {
     info: async () => {
       let i = {};
       try { i = await window.p360.system.info(); } catch { /* ignore */ }
-      const up = i.uptimeSec ? `${Math.floor(i.uptimeSec / 86400)}d ${Math.floor((i.uptimeSec % 86400) / 3600)}h` : '—';
+      const sec = i.uptimeSec || 0;
+      const up = !sec ? '—' : sec >= 86400 ? `${Math.floor(sec / 86400)}d ${Math.floor((sec % 86400) / 3600)}h` : sec >= 3600 ? `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}m` : `${Math.max(1, Math.floor(sec / 60))}m`;
       return [
         info('Project 360', 'Console dashboard for Windows', `v${state.version || ''}`),
         info('System', null, `${i.os || 'Windows'} ${i.osBuild || ''}`),
@@ -431,6 +450,9 @@ export function systemBlade(ctx) {
       pane.append(...rows);
     },
   });
+
+  // Paired devices changed in the background (connected, paired, removed): refresh the list.
+  window.p360.on('radio:event', (ev) => { if (ev.type === 'bt.paired' && split.current() === 'bluetooth') split.rerender(); });
 
   return {
     id: 'system',

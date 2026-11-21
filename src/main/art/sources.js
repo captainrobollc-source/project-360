@@ -400,7 +400,9 @@ async function sgdbGameId(key, g) {
     if (r && r.success && r.data) return r.data.id;
   }
   const r = await U.fetchJson(`${SGDB}/search/autocomplete/${encodeURIComponent(g.title)}`, { headers: H });
-  return r && r.success && r.data && r.data[0] ? r.data[0].id : null;
+  // Only an actual title match: the first autocomplete hit for "Launcher" is some random game.
+  const hit = r && r.success && Array.isArray(r.data) ? r.data.find((x) => U.sameTitle(x.name, g.title)) : null;
+  return hit ? hit.id : null;
 }
 
 function sgdbCandidate(key, gid, title) {
@@ -442,13 +444,13 @@ async function igdbSearch(clientId, secret, title) {
     if (!t || !t.access_token) return null;
     igdbToken = { token: t.access_token, exp: Date.now() + (t.expires_in - 60) * 1000 };
   }
-  const body = `search "${String(title).replace(/"/g, '')}"; fields name,summary,first_release_date,genres.name,cover.image_id,artworks.image_id,screenshots.image_id,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 1;`;
+  const body = `search "${String(title).replace(/"/g, '')}"; fields name,summary,first_release_date,genres.name,cover.image_id,artworks.image_id,screenshots.image_id,involved_companies.developer,involved_companies.publisher,involved_companies.company.name; limit 5;`;
   const r = await U.fetchJson('https://api.igdb.com/v4/games', {
     method: 'POST',
     headers: { 'Client-ID': clientId, Authorization: `Bearer ${igdbToken.token}`, 'Content-Type': 'text/plain' },
     body,
   });
-  const hit = Array.isArray(r) && r[0] ? r[0] : null;
+  const hit = Array.isArray(r) ? r.find((x) => U.sameTitle(x.name, title)) : null; // not just the first result
   if (!hit) return null;
   const img = (id, size) => `https://images.igdb.com/igdb/image/upload/${size}/${id}.jpg`;
   const wide = (hit.artworks && hit.artworks[0]) || (hit.screenshots && hit.screenshots[0]);

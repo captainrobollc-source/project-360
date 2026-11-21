@@ -90,7 +90,7 @@ function scanEmulator(profile) {
   return walkRoms(profile.romsPath, exts).map((rom) => {
     const title = titleFromFile(rom);
     const argTemplate = profile.args || '"{rom}"';
-    const args = argTemplate.match(/(?:[^\s"]+|"[^"]*")+/g)
+    const args = (argTemplate.match(/(?:[^\s"]+|"[^"]*")+/g) || [])
       .map((a) => a.replace(/^"|"$/g, '').replace(/\{rom\}/g, rom).replace(/\{romdir\}/g, path.dirname(rom)));
     return {
       ...exeEntry(`rom:${hash(rom)}`, 'rom', title, profile.emulator, args, path.dirname(profile.emulator)),

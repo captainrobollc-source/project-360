@@ -81,9 +81,11 @@ function list(settings, userDataDir) {
   for (const c of settings.get('media.custom') || []) {
     if (c.url) web(`custom-${hash(c.url)}`, c.title || c.url, c.url, c.color || '#3a6ea5', 'globe', { custom: true });
     else if (c.exe) {
+      // exe() skips a missing file; only patch the entry it actually added.
+      const before = out.length;
       exe(`custom-${hash(c.exe)}`, c.title || path.basename(c.exe), c.exe, c.color || '#3a6ea5', 'app');
-      const last = out[out.length - 1];
-      if (last) { last.custom = true; if (c.args) last.launch.args = c.args; }
+      const added = out.length > before ? out[out.length - 1] : null;
+      if (added) { added.custom = true; if (c.args) added.launch.args = c.args; }
     }
   }
   const seen = new Set();

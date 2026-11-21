@@ -5,7 +5,7 @@ import { iconEl, avatar, icon } from '../icons.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
 import { state, on, gameById, setting, recentGames } from '../store.js';
-import { getRoot, button, confirm } from './modal.js';
+import { getRoot, button, confirm, claimLayer, releaseLayer } from './modal.js';
 import { createRing, batteryEl, batteryText } from './ring.js';
 import { coverTile } from './tiles.js';
 import { lastSlot } from '../input.js';
@@ -46,6 +46,9 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
     const root = getRoot();
     const scrim = h('div.scrim');
     const panel = h('div.guide');
+    const z = claimLayer();
+    scrim.style.zIndex = String(z - 1);
+    panel.style.zIndex = String(z);
     root.append(scrim, panel);
     const focus = new nav.Focus(panel);
     const ring = createRing();
@@ -60,7 +63,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
       h('div.gs', {}, h('span.gcoin', {}, 'G'), `${state.achievements.totals.score.toLocaleString()}`, game ? '  ·  In game' : '')), h('div.spacer'), clock, ring.el));
     ring.update(state.pads, state.activeSlot >= 0 ? state.activeSlot : guideSlot);
 
-    const body = h('div.gbody');
+    const body = h('div.gbody', { 'data-scroll': '' });
     panel.append(body);
     let firstFocus = null;
     let sessionEl = null;
@@ -137,13 +140,21 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
       volPct.textContent = vol.muted ? 'Muted' : `${pc}%`;
       volIcon.replaceChildren(iconEl(vol.muted ? 'mute' : 'volume'));
     };
+    let volSeq = 0;
     volRow._adjust = async (d) => {
       vol.volume = clamp(Math.round((vol.volume + d * 0.05) * 20) / 20, 0, 1);
       const wasMuted = vol.muted;
       vol.muted = false;
       paintVol();
       sound.play('tick');
-      try { vol = await window.p360.system.volume('set', vol.volume); if (wasMuted || vol.muted) vol = await window.p360.system.volume('mute', false); paintVol(); } catch { /* ignore */ }
+      // Held RT/▶ sends many steps; only the newest response may update the knob.
+      const mySeq = ++volSeq;
+      const target = vol.volume;
+      try {
+        let res = await window.p360.system.volume('set', target);
+        if (wasMuted || res.muted) res = await window.p360.system.volume('mute', false);
+        if (mySeq === volSeq) { vol = res; paintVol(); }
+      } catch { /* ignore */ }
     };
     volRow._activate = async () => { try { vol = await window.p360.system.volume('mute', !vol.muted); paintVol(); } catch { /* ignore */ } };
     body.append(volRow);
@@ -171,6 +182,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
     body.append(h('div.section-k', {}, 'Players'));
     const playersRow = h('div.players');
     const paintPlayers = () => {
+      const focusedSlot = focus.current && playersRow.contains(focus.current) ? focus.current._slot : null;
       playersRow.replaceChildren();
       const slots = (state.slots || []).length ? state.slots : state.pads.filter((x) => x.connected).map((x) => ({ slot: x.slot, connected: true }));
       for (const sl of slots) {
@@ -182,17 +194,20 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
           pad && pad.connected ? batteryEl(pad.battery) : null);
         card._activate = async () => {
           if (!signIn) return;
-          if (!sl.profileId) { close({ notify: false }); signIn(sl.slot); return; }
+          if (!sl.profileId) { signInFromGuide(sl.slot); return; }
           const pick = await (await import('./modal.js')).menu({ title: `${sl.gamertag} · Player ${sl.slot + 1}`, items: [
             { label: 'Switch profile', value: 'switch', icon: 'user' },
             { label: 'Sign out', value: 'out', icon: 'close' },
           ] });
-          if (pick === 'switch') { close({ notify: false }); signIn(sl.slot); }
+          if (pick === 'switch') signInFromGuide(sl.slot);
           if (pick === 'out') { await window.p360.profiles.signOut(sl.slot); }
         };
+        card._slot = sl.slot;
         playersRow.append(card);
+        if (focusedSlot === sl.slot) focus.set(card);
       }
-      if (!slots.length) playersRow.append(h('div.ps', {}, 'No controllers connected'));
+      if (focusedSlot !== null && !playersRow.contains(focus.current)) { const f = playersRow.querySelector('[data-focus]'); if (f) focus.set(f); }
+      if (!slots.length) playersRow.append(h('div.ps.none', {}, 'No controllers connected'));
     };
     paintPlayers();
     body.append(playersRow);
@@ -206,7 +221,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
       button('Exit to desktop', { icon: 'desktop', onActivate: () => power('desktop', 'Exit to the Windows desktop?', 'Project 360 will close and the Windows desktop will start.') })));
     if (unsigned && signIn) {
       // Guide pressed on a controller with nobody signed in: offer sign-in first.
-      const b = button(`Sign in · Player ${guideSlot + 1}`, { icon: 'user', onActivate: () => { close({ notify: false }); signIn(guideSlot); } });
+      const b = button(`Sign in · Player ${guideSlot + 1}`, { icon: 'user', onActivate: () => signInFromGuide(guideSlot) });
       body.prepend(h('div.btnrow', {}, b));
       firstFocus = b;
     }
@@ -258,6 +273,15 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
     window.p360.system.power(action);
   }
 
+  // Sign-in replaces the Guide. In the in-game overlay, give input back to the game once it's
+  // done (or cancelled), unless the Guide was opened again meanwhile.
+  function signInFromGuide(slot) {
+    close({ notify: false });
+    Promise.resolve(signIn(slot)).catch(() => {}).finally(() => {
+      if (mode === 'overlay' && !cur) window.p360.overlay.guideClosed();
+    });
+  }
+
   function close({ notify = true } = {}) {
     if (!cur) return;
     const c = cur;
@@ -270,6 +294,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
       if (nav.top() === t) break;
     }
     nav.pop(c.layer);
+    releaseLayer();
     document.body.classList.remove('guide-open');
     sound.play('back');
     c.panel.classList.remove('in');

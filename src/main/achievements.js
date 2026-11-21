@@ -94,12 +94,14 @@ class Achievements extends EventEmitter {
         const hr = start.getHours();
         if (s >= 300 && hr < 5) this.unlock('night-owl');
         if (s >= 300 && hr >= 5 && hr < 8) this.unlock('early-bird');
-        const day = start.toISOString().slice(0, 10);
+        // Local calendar days (hours and weekday are local too), not UTC.
+        const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        const day = dayKey(start);
         st.days = Array.from(new Set([...(st.days || []), day])).slice(-60);
         if (st.days.length >= 7) this.unlock('daily-dose');
         if (start.getDay() === 0) {
           const sat = new Date(start); sat.setDate(sat.getDate() - 1);
-          if (st.days.includes(sat.toISOString().slice(0, 10))) this.unlock('weekend-warrior');
+          if (st.days.includes(dayKey(sat))) this.unlock('weekend-warrior');
         }
         this.save();
         this.evaluateLibrary(ctx.games || []);

@@ -248,7 +248,7 @@ body:not(.theme-classic) .osk .field { background: rgba(0,0,0,.45); }
 .avpick .avgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; }
 .avpick .avcell { position: relative; padding: 10px; border-radius: 22px; border: 3px solid transparent; cursor: pointer; transition: transform 160ms var(--ease), border-color 160ms; }
 .avpick .avcell .avatar { width: 100%; height: auto; aspect-ratio: 1; }
-.avpick .avcell.current::after { content: ''; position: absolute; right: 8px; bottom: 8px; width: 18px; height: 18px; border-radius: 50%; background: var(--green-2); box-shadow: 0 0 0 3px var(--modal-bg, #fff); }
+.avpick .avcell.current::after { content: ''; position: absolute; right: 8px; bottom: 8px; width: 18px; height: 18px; border-radius: 50%; background: var(--green-2); box-shadow: 0 0 0 3px #fff; }
 .avpick .avcell.focused { border-color: var(--green-2); box-shadow: var(--pill-glow); transform: scale(1.06); }
 
 /* Bluetooth: Add a device */
@@ -265,3 +265,23 @@ body:not(.theme-classic) .osk .field { background: rgba(0,0,0,.45); }
 .btadd .empty-note { margin: 4px 0 18px; opacity: .6; font-size: 20px; }
 .btadd .btns { margin-top: 6px; }
 .dialog .bigpin { margin: 10px 0 18px; font-size: 72px; font-weight: 300; letter-spacing: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+
+/* While a dialog or the Guide is open, the prompt bar stays readable above the dimming. */
+body.has-layer .prompts { z-index: 395 !important; }
+body.viewer-open .prompts { opacity: 0; pointer-events: none; }
+
+/* ---- sweep fixes ---- */
+/* Toasts: long text ends in an ellipsis instead of being cut mid-letter. */
+.toast .tx { min-width: 0; overflow: hidden; }
+.toast .tt { overflow: hidden; text-overflow: ellipsis; }
+.toast:not(.signin) .ts { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* The prompt bar already shows the launch screen's buttons. */
+.launch .lhint { display: none; }
+/* Classic theme: battery outlines were near-invisible on light blades. */
+.blade .battery { color: var(--ink-faint, #8a9299); }
+.blade .battery i { background: var(--track, rgba(0,0,0,.12)); }
+.row.focused .battery, .player.focused .battery { color: #fff; }
+/* Guide: never taller than the screen; the body scrolls. */
+.guide { max-height: 1040px; display: flex; flex-direction: column; }
+.guide .gbody { overflow-y: auto; min-height: 0; }
+.guide .players > .ps.none { grid-column: 1 / -1; font-size: 17px; color: #a3acb4; padding: 8px 4px; }

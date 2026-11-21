@@ -110,7 +110,8 @@ async function systemDb(system, cacheDir) {
     if (r.rom) db.byName.set(r.rom.replace(/\.[^.]+$/, '').toLowerCase(), m);
     if (r.crc) db.byCrc.set(r.crc, m);
   }
-  mem.set(system, db);
+  // A failed download (offline at boot) mustn't stick for the whole session: cache only real data.
+  if (recs.length) mem.set(system, db);
   return db;
 }
 

@@ -59,7 +59,7 @@ namespace P360
             }
             // Parent went away (quit or crash): never leave the taskbar hidden or keys held.
             Taskbar.Show();
-            if (Emu.Active) { Emu.Active = false; Emu.ReleaseAll(); }
+            Emu.Deactivate();
             Environment.Exit(0);
         }
 
@@ -103,8 +103,8 @@ namespace P360
                 case "wins.hide": return Json.Bool(Win.HideWindow(new IntPtr(long.Parse(Arg(p, 2)))));
                 case "wins.alive": return Json.Bool(Win.Alive(new IntPtr(long.Parse(Arg(p, 2)))));
                 case "wins.bottom": return Json.Bool(Win.SendToBottom(new IntPtr(long.Parse(Arg(p, 2)))));
-                case "emu.on": Emu.Active = true; return "true";
-                case "emu.off": Emu.Active = false; Emu.ReleaseAll(); return "true";
+                case "emu.on": Emu.Activate(); return "true";
+                case "emu.off": Emu.Deactivate(); return "true";
                 case "focus.hwnd": return Json.Bool(Win.ForceForeground(new IntPtr(long.Parse(Arg(p, 2)))));
                 case "focus.pids": return Json.Bool(Win.FocusPids(Arg(p, 2)));
                 case "power.sleep": return Json.Bool(Win.SetSuspendState(false, false, false));
@@ -334,6 +334,7 @@ namespace P360
                         if (lt[s]) mask |= 1 << 16;
                         if (rt[s]) mask |= 1 << 17;
 
+                        Emu.Seen(s, g.wButtons);
                         if (Emu.Active) Emu.Process(s, g);
 
                         if (mask != masks[s])
@@ -478,8 +479,36 @@ namespace P360
 
         public static volatile bool Active = false;
         static ushort[] prev = new ushort[4];
+        static readonly ushort[] live = new ushort[4];   // buttons physically down right now
+        static readonly ushort[] ignore = new ushort[4]; // held when emulation turned on: wait for release
         static double accX, accY, accWheel, accHWheel;
         static readonly Dictionary<int, long> held = new Dictionary<int, long>();
+        static readonly Dictionary<int, ushort> heldVk = new Dictionary<int, ushort>();
+        static readonly object sync = new object();
+
+        public static void Seen(int s, ushort b) { live[s] = b; }
+
+        // The button that closed the Guide (or picked "Resume") is still down at this moment;
+        // don't let it reach the app as a fresh press.
+        public static void Activate()
+        {
+            lock (sync)
+            {
+                for (int s = 0; s < 4; s++) { prev[s] = live[s]; ignore[s] = live[s]; }
+                held.Clear(); heldVk.Clear();
+                accX = accY = accWheel = accHWheel = 0;
+                Active = true;
+            }
+        }
+
+        public static void Deactivate()
+        {
+            lock (sync)
+            {
+                Active = false;
+                ReleaseAll();
+            }
+        }
         static readonly Stopwatch clock = Stopwatch.StartNew();
 
         static void Send(INPUT i) { SendInput(1, new[] { i }, Marshal.SizeOf(typeof(INPUT))); }
@@ -508,11 +537,12 @@ namespace P360
             if (mod != 0) Key(mod, true);
         }
 
-        public static void ReleaseAll()
+        static void ReleaseAll()
         {
             Mouse(0x4); Mouse(0x10); Mouse(0x40);
+            foreach (var vk in heldVk.Values) Key(vk, true); // no arrow / page key left logically down
             for (int s = 0; s < 4; s++) prev[s] = 0;
-            held.Clear();
+            held.Clear(); heldVk.Clear();
         }
 
         static double Curve(int v, int dz)
@@ -524,6 +554,15 @@ namespace P360
         }
 
         public static void Process(int s, XINPUT_GAMEPAD g)
+        {
+            lock (sync)
+            {
+                if (!Active) return;
+                ProcessLocked(s, g);
+            }
+        }
+
+        static void ProcessLocked(int s, XINPUT_GAMEPAD g)
         {
             // Pointer + scrolling (called every ~8 ms)
             accX += Curve(g.sThumbLX, 7849) * 24;
@@ -538,9 +577,10 @@ namespace P360
             int hw = (int)accHWheel; accHWheel -= hw;
             if (hw != 0) Mouse(0x1000, 0, 0, hw);
 
-            ushort b = g.wButtons;
+            ignore[s] &= g.wButtons;                       // released buttons stop being ignored
+            ushort b = (ushort)(g.wButtons & ~ignore[s]);
             ushort pressed = (ushort)(b & ~prev[s]);
-            ushort released = (ushort)(prev[s] & ~b);
+            ushort released = (ushort)(prev[s] & ~b & ~ignore[s]);
             prev[s] = b;
 
             if ((pressed & 0x1000) != 0) Mouse(0x2);   // A down
@@ -571,9 +611,9 @@ namespace P360
             long now = clock.ElapsedMilliseconds;
             long since;
             bool was = held.TryGetValue(key, out since);
-            if (down && !was) { held[key] = now; Key(vk, false); }
+            if (down && !was) { held[key] = now; heldVk[key] = vk; Key(vk, false); }
             else if (down && was && now - since > 420) { held[key] = now - 350; Key(vk, false); } // ~70 ms repeat
-            else if (!down && was) { held.Remove(key); Key(vk, true); }
+            else if (!down && was) { held.Remove(key); heldVk.Remove(key); Key(vk, true); }
         }
     }
 

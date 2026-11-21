@@ -54,11 +54,14 @@ const started = Date.now();
 setInterval(() => {
   const beat = readBeat();
   if (beat && beat.state === 'exit') { log('clean exit'); process.exit(0); }
+  // A newer instance (restart, restore, update) owns the heartbeat now: not ours to watch.
+  if (beat && beat.pid && beat.pid !== pid) { log(`handed over to pid ${beat.pid}`); process.exit(0); }
   if (!alive(pid)) {
     // Give a just-written exit marker a moment to land.
     setTimeout(() => {
       const b = readBeat();
       if (b && b.state === 'exit') { log('clean exit'); process.exit(0); }
+      if (b && b.pid && b.pid !== pid) { log(`handed over to pid ${b.pid}`); process.exit(0); }
       relaunch('dashboard process ended unexpectedly');
     }, 1500);
     return;

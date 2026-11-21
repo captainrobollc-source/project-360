@@ -25,7 +25,7 @@ async function scan() {
       launch: {
         type: 'exe',
         target: v.exe,
-        args: v.launchParam ? v.launchParam.match(/(?:[^\s"]+|"[^"]*")+/g).map((a) => a.replace(/^"|"$/g, '')) : [],
+        args: v.launchParam ? (v.launchParam.match(/(?:[^\s"]+|"[^"]*")+/g) || []).map((a) => a.replace(/^"|"$/g, '')) : [],
         cwd: v.workingDir || path.dirname(v.exe),
       },
       watch: { dirs: [dir], exes: [path.basename(v.exe)] },

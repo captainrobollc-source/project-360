@@ -7,9 +7,10 @@ const fs = require('fs');
 const path = require('path');
 
 class Updater extends EventEmitter {
-  constructor({ settings }) {
+  constructor({ settings, shell = false }) {
     super();
     this.settings = settings;
+    this.shell = shell;
     this.status = { state: app.isPackaged ? 'idle' : 'dev', version: app.getVersion(), available: null, progress: 0, error: null, checkedAt: 0 };
     this.au = null;
     this.timer = null;
@@ -33,12 +34,9 @@ class Updater extends EventEmitter {
     if (!this.configured()) this.set({ state: 'unconfigured' });
     try { ({ autoUpdater: this.au } = require('electron-updater')); } catch (e) { this.set({ state: 'error', error: e.message }); return; }
     const au = this.au;
-    au.autoDownload = this.settings.get('updates.auto') !== false;
     au.autoInstallOnAppQuit = true;
-    au.allowPrerelease = !!this.settings.get('updates.beta');
     au.logger = { info: (m) => console.log('[update]', m), warn: (m) => console.warn('[update]', m), error: (m) => console.error('[update]', m), debug: () => {} };
-    const repo = this.repo();
-    if (repo) { const [owner, name] = repo.split('/'); au.setFeedURL({ provider: 'github', owner, repo: name }); }
+    this.applyConfig();
     au.on('checking-for-update', () => this.set({ state: 'checking', error: null }));
     au.on('update-not-available', () => this.set({ state: 'current', checkedAt: Date.now() }));
     au.on('update-available', (i) => this.set({ state: au.autoDownload ? 'downloading' : 'available', available: i.version, checkedAt: Date.now() }));
@@ -50,11 +48,26 @@ class Updater extends EventEmitter {
     this.timer = setInterval(() => this.check(true), 6 * 3600 * 1000);
   }
 
+  // Settings › Updates changes (repo, auto download, beta) apply on the next check.
+  applyConfig() {
+    const au = this.au;
+    if (!au) return;
+    au.autoDownload = this.settings.get('updates.auto') !== false;
+    au.allowPrerelease = !!this.settings.get('updates.beta');
+    const repo = this.repo();
+    if (repo && repo !== this.feedRepo) {
+      const [owner, name] = repo.split('/');
+      au.setFeedURL({ provider: 'github', owner, repo: name });
+      this.feedRepo = repo;
+    }
+  }
+
   async check(background = false) {
     if (!app.isPackaged) { this.set({ state: 'dev' }); return this.status; }
     if (!this.configured()) { this.set({ state: 'unconfigured' }); return this.status; }
     if (!this.au) this.init();
     if (!this.au || (background && this.blocked && this.blocked())) return this.status;
+    this.applyConfig();
     try { await this.au.checkForUpdates(); } catch (e) { this.set({ state: 'error', error: e.message.split('\n')[0] }); }
     return this.status;
   }
@@ -69,7 +82,10 @@ class Updater extends EventEmitter {
   install() {
     if (!this.au || this.status.state !== 'ready') throw new Error('No update ready');
     this.emit('installing');
-    setImmediate(() => this.au.quitAndInstall(true, true));
+    this.installing = true;
+    // In console shell mode the shell launcher relaunches us (exit code 66) once the installer
+    // is done, so don't let the installer start a second, non-shell copy.
+    setImmediate(() => this.au.quitAndInstall(true, !this.shell));
   }
 }
 

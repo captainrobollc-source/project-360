@@ -18,7 +18,7 @@ function detectSteamId() {
 }
 
 async function get(ses, url) {
-  try { return await ses.fetch(url, { redirect: 'manual' }); }
+  try { return await ses.fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); }
   catch (e) { if (/redirect/i.test(e.message)) return { status: 302, ok: false, json: async () => ({}) }; throw e; }
 }
 
@@ -31,7 +31,7 @@ async function cookieOwned(ses) {
 
 async function apiOwned(key, steamId) {
   if (!key || !steamId) return null;
-  const r = await fetch(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(key)}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1`);
+  const r = await fetch(`https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${encodeURIComponent(key)}&steamid=${steamId}&include_appinfo=1&include_played_free_games=1`, { signal: AbortSignal.timeout(15000) });
   if (!r.ok) return null;
   const games = ((await r.json()).response || {}).games;
   return Array.isArray(games) && games.length ? games : null;
@@ -56,7 +56,7 @@ async function storeItems(appids) {
     const ids = appids.slice(i, i + 100).map((a) => ({ appid: Number(a) }));
     const input = { ids, context: { language: 'english', country_code: 'US' }, data_request: { include_assets: true } };
     try {
-      const r = await fetch(`https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=${encodeURIComponent(JSON.stringify(input))}`);
+      const r = await fetch(`https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=${encodeURIComponent(JSON.stringify(input))}`, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) continue;
       for (const it of ((await r.json()).response || {}).store_items || []) if (it.appid) out.set(String(it.appid), it);
     } catch { /* partial */ }

@@ -4,11 +4,13 @@ import { icon } from '../icons.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
 import * as music from './music.js';
-import { getRoot } from './modal.js';
+import { getRoot, claimLayer, releaseLayer } from './modal.js';
 import { track } from '../store.js';
 
 function shell({ prompts, handle, build }) {
   const el = h('div.viewer');
+  el.style.zIndex = String(claimLayer()); // above the Guide or a dialog it was opened from
+  document.body.classList.add('viewer-open');
   getRoot().append(el);
   let idleT;
   const wake = () => { el.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => el.classList.add('idle'), 3500); };
@@ -18,6 +20,8 @@ function shell({ prompts, handle, build }) {
   };
   function close() {
     nav.pop(layer);
+    releaseLayer();
+    if (document.querySelectorAll('.viewer').length <= 1) document.body.classList.remove('viewer-open'); // this one is still fading out
     sound.play('back');
     el.classList.remove('in');
     clearTimeout(idleT);

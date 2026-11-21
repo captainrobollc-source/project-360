@@ -102,6 +102,16 @@ function gamepadMask(gp) {
   return m;
 }
 
+// DirectInput pads (DualSense, Switch Pro…) take a free player slot 1–4 instead of "Player 5+".
+const directSlots = new Map(); // Gamepad API index → slot
+function slotForDirect(index) {
+  if (directSlots.has(index)) return directSlots.get(index);
+  const used = new Set([...(state.pads || []).filter((p) => p.connected).map((p) => p.slot), ...directSlots.values()]);
+  for (let s = 0; s < 4; s++) if (!used.has(s)) { directSlots.set(index, s); return s; }
+  return 4 + index;
+}
+window.addEventListener('gamepaddisconnected', (e) => directSlots.delete(e.gamepad.index));
+
 function pollGamepads() {
   if (!document.hidden && !state.suspended) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -115,7 +125,7 @@ function pollGamepads() {
       const knownDirect = /054c|057e|wireless controller \(standard|dualsense|dualshock|pro controller/i.test(gp.id);
       if (nativeOk && (/xinput|xbox/i.test(gp.id) || (nativePads > 0 && !knownDirect))) continue;
       const sony = /054c|dualsense|dualshock/i.test(gp.id);
-      feed(`gp${gp.index}`, gamepadMask(gp), 4 + gp.index, { allowGuide: !(nativeOk && sony) });
+      feed(`gp${gp.index}`, gamepadMask(gp), slotForDirect(gp.index), { allowGuide: !(nativeOk && sony) });
     }
   }
   requestAnimationFrame(pollGamepads);

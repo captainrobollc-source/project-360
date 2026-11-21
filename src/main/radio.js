@@ -19,20 +19,59 @@ function ensure() {
     helper.on('bt.pairing', (m) => events.emit('event', { type: 'bt.pairing', id: m.id, name: m.name, kind: m.kind, pin: m.pin }));
   }
   if (helper.ready) return Promise.resolve();
+  if (!helper.proc) return Promise.reject(new Error('Bluetooth/Wi-Fi helper unavailable'));
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('Bluetooth/Wi-Fi helper unavailable')), 5000);
     helper.once('ready', () => { clearTimeout(t); resolve(); });
   });
 }
 
+// A device that's already paired often also advertises a second, unpaired endpoint (e.g. the
+// BLE side of AirPods or a controller). Hide those from "Add a device".
+const macOf = (id) => { const m = /([0-9a-f]{2}(?::[0-9a-f]{2}){5})$/i.exec(String(id || '')); return m ? m[1].toLowerCase() : null; };
+const nameKey = (n) => String(n || '').trim().toLowerCase().replace(/[‘’']/g, "'");
+let pairedKeys = { names: new Set(), macs: new Set() };
+function rememberPaired(list) {
+  pairedKeys = { names: new Set(list.map((d) => nameKey(d.name))), macs: new Set(list.map((d) => macOf(d.id)).filter(Boolean)) };
+}
+const isPairedTwin = (dev) => pairedKeys.names.has(nameKey(dev.name)) || pairedKeys.macs.has(macOf(dev.id));
+
 // Devices re-report signal strength several times a second; forward only real changes.
 const seen = new Map();
 function onFound({ dev }) {
+  if (isPairedTwin(dev)) return;
   const prev = seen.get(dev.id);
   const now = Date.now();
   if (prev && prev.name === dev.name && prev.connected === dev.connected && Math.abs((prev.rssi || 0) - (dev.rssi || 0)) < 8 && now - prev.at < 5000) return;
   seen.set(dev.id, { name: dev.name, connected: dev.connected, rssi: dev.rssi, at: now });
   events.emit('event', { type: 'bt.found', dev: { ...dev, kind: kindOf(dev) } });
+}
+
+// Cached answers so System › Bluetooth / Network open instantly; a background refresh follows.
+const cache = { radios: null, radiosAt: 0, paired: null, pairedAt: 0 };
+let pairedInflight = null;
+async function fetchPaired() {
+  if (pairedInflight) return pairedInflight;
+  pairedInflight = (async () => {
+    await ensure();
+    const list = (await helper.callT(10000, 'bt.paired'))
+      .map((d) => ({ ...d, kind: kindOf(d) }))
+      .sort((a, b) => (b.connected - a.connected) || a.name.localeCompare(b.name));
+    const changed = JSON.stringify(list) !== JSON.stringify(cache.paired);
+    cache.paired = list;
+    cache.pairedAt = Date.now();
+    rememberPaired(list);
+    if (changed) events.emit('event', { type: 'bt.paired', list });
+    return list;
+  })().finally(() => { pairedInflight = null; });
+  return pairedInflight;
+}
+async function fetchRadios() {
+  await ensure();
+  const list = await helper.call('radios');
+  cache.radios = list;
+  cache.radiosAt = Date.now();
+  return list;
 }
 
 // controller · audio · keyboard · mouse · phone · computer · other
@@ -75,18 +114,50 @@ async function savedNetworks() {
 
 const api = {
   events,
-  async radios() { await ensure(); return helper.call('radios'); },
-  async setRadio(kind, on) { await ensure(); return helper.callT(15000, 'radio.set', kind, on ? 'on' : 'off'); },
+  // Starts the helper and fills the caches in the background (called a little after boot).
+  prewarm() { fetchRadios().then(() => fetchPaired()).catch(() => {}); },
 
-  async paired() {
-    await ensure();
-    const list = await helper.callT(10000, 'bt.paired');
-    return list.map((d) => ({ ...d, kind: kindOf(d) })).sort((a, b) => (b.connected - a.connected) || a.name.localeCompare(b.name));
+  async radios({ fresh = false } = {}) {
+    if (!fresh && cache.radios && Date.now() - cache.radiosAt < 15000) return cache.radios;
+    return fetchRadios();
   },
-  async scan(on) { await ensure(); seen.clear(); return helper.call(on ? 'bt.scan.start' : 'bt.scan.stop'); },
-  async pair(id) { await ensure(); return helper.callT(120000, 'bt.pair', id); },
+  async setRadio(kind, on) {
+    await ensure();
+    const list = await helper.callT(15000, 'radio.set', kind, on ? 'on' : 'off');
+    cache.radios = list;
+    cache.radiosAt = Date.now();
+    if (kind === 'bluetooth' && on) fetchPaired().catch(() => {});
+    return list;
+  },
+
+  // Cached list right away (refreshing behind it when older than 10 s); waits only the first time.
+  async paired({ fresh = false } = {}) {
+    if (cache.paired && !fresh) {
+      if (Date.now() - cache.pairedAt > 10000) fetchPaired().catch(() => {});
+      return cache.paired;
+    }
+    return fetchPaired();
+  },
+  async scan(on) {
+    await ensure();
+    seen.clear();
+    if (on) { try { await api.paired(); } catch { /* filter with what we have */ } }
+    return helper.call(on ? 'bt.scan.start' : 'bt.scan.stop');
+  },
+  async pair(id) {
+    await ensure();
+    const res = await helper.callT(120000, 'bt.pair', id);
+    if (res && res.paired) fetchPaired().catch(() => {});
+    return res;
+  },
   async reply(id, accept, pin = '') { await ensure(); return helper.call('bt.reply', id, accept ? '1' : '0', pin); },
-  async unpair(id) { await ensure(); return helper.callT(30000, 'bt.unpair', id); },
+  async unpair(id) {
+    await ensure();
+    const res = await helper.callT(30000, 'bt.unpair', id);
+    if (res && res.ok && cache.paired) { cache.paired = cache.paired.filter((d) => d.id !== id); rememberPaired(cache.paired); }
+    fetchPaired().catch(() => {});
+    return res;
+  },
 
   async wifi(rescan = true) {
     await ensure();

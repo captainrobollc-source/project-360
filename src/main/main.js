@@ -135,7 +135,7 @@ function setActive(id) {
 }
 
 const backups = new Backups({ userDir: USER, version: app.getVersion(), flush: () => { settings.flush(); library.flush(); try { emulation.state.flush(); } catch { /* ignore */ } } });
-const updater = new Updater({ settings });
+const updater = new Updater({ settings, shell: AS_SHELL });
 const SOUNDS_DIR = path.join(USER, 'sounds');
 const THUMBS_DIR = path.join(USER, 'thumbs');
 
@@ -242,6 +242,7 @@ function suspendDashboard() {
   showCurtain();
   main.setAlwaysOnTop(false);
   main.hide(); // stops compositing/rendering, frees GPU time for the game
+  updateEmu();
 }
 
 async function restoreDashboard() {
@@ -253,6 +254,7 @@ async function restoreDashboard() {
   if (curtain && curtain.isVisible()) curtain.hide();
   if (!WINDOWED && !main.isFullScreen()) main.setFullScreen(true);
   if (coverOn()) main.setAlwaysOnTop(true, 'normal');
+  updateEmu(); // the dashboard owns the pad again: controller mouse off
   await focusWindow(main);
 }
 
@@ -311,6 +313,7 @@ const masks = [0, 0, 0, 0];
 let chordTimer = null;
 
 function inputTarget() {
+  if (signInWin) return null;
   if (overlayGuideOpen) return overlay;
   if (mainVisible()) return main;
   return null;
@@ -326,6 +329,7 @@ native.on('in', ({ s, b }) => {
     if (both && (prev & 0x30) !== 0x30) chordTimer = setTimeout(() => { if ((masks[s] & 0x30) === 0x30) onGuide(s); }, 700);
     if (!both) clearTimeout(chordTimer);
   }
+  if (signInWin) return; // controller mouse is driving the sign-in window
   const target = inputTarget();
   if (target) return send(target, 'pad', { s, b });
   // Built-in TV apps get the pad as key presses.
@@ -363,9 +367,11 @@ native.on('bat', ({ s, type, lvl }) => {
   }
 });
 
+native.on('exit', () => { taskbarHidden = false; emuOn = false; });
 native.on('ready', (info) => {
   native.call('pad.battery').catch(() => {});
   applyTaskbar();
+  updateEmu();
   broadcast('native:ready', info);
 });
 
@@ -396,6 +402,11 @@ launcher.on('reveal', async ({ hwnd, internal }) => {
   if (hwnd) { try { await native.call('focus.hwnd', hwnd); } catch { /* ignore */ } }
   else launcher.focusGame();
   updateEmu();
+});
+
+launcher.on('failed', ({ item, error }) => {
+  toast({ kind: 'orb', icon: 'close', title: `Couldn't start ${item.title}`, text: error, sound: 'error' });
+  if (!mainVisible()) restoreDashboard();
 });
 
 launcher.on('exited', async (info) => {
@@ -450,8 +461,11 @@ library.on('scanned', ({ added }) => {
   if (signedIn) achievements.track('library', {}, { games: library.view() });
 });
 achievements.on('unlock', (a) => {
-  toast({ kind: 'achievement', icon: a.icon, title: 'Achievement unlocked', text: `${a.points}G – ${a.title}`, sound: 'achievement', duration: 5200 });
-  broadcast('achievements:updated', { list: achievements.list(), totals: achievements.totals() });
+  const who = launchProfile && launchProfile !== settings.get('activeProfile') ? profileById(launchProfile) : null;
+  toast({ kind: 'achievement', icon: a.icon, title: who ? `${who.gamertag} unlocked an achievement` : 'Achievement unlocked', text: `${a.points}G – ${a.title}`, sound: 'achievement', duration: 5200 });
+  // Unlocks at game exit fire inside withProfile(launcher's profile): read the list after it
+  // returns, so the dashboard shows the active player's achievements.
+  setImmediate(() => broadcast('achievements:updated', { list: achievements.list(), totals: achievements.totals() }));
 });
 
 // ------------------------------------------------------------------ sound packs
@@ -653,10 +667,18 @@ handle('profiles:delete', (e, id) => {
   const list = settings.get('profiles');
   if (list.length <= 1) throw new Error('You need at least one profile');
   settings.data.profiles = list.filter((p) => p.id !== id);
+  for (const [k, v] of Object.entries(slotProfiles)) if (v === id) delete slotProfiles[k];
+  if (launchProfile === id) launchProfile = null;
   library.deleteProfileData(id);
-  if (settings.get('activeProfile') === id) settings.data.activeProfile = settings.data.profiles[0].id;
+  if (settings.get('activeProfile') === id) {
+    const next = Object.values(slotProfiles)[0] || settings.data.profiles[0].id;
+    settings.data.activeProfile = next;
+    library.setProfile(next);
+    broadcast('achievements:updated', { list: achievements.list(), totals: achievements.totals() });
+  }
   settings.save();
   broadcast('settings:updated', settingsView());
+  broadcastSlots();
   return true;
 });
 handle('profiles:signIn', (e, id, slot = 0) => {
@@ -834,9 +856,10 @@ handle('dialog:addFolder', async (e, kind = 'games') => {
 });
 
 handle('app:quit', () => { app.exit(0); });
+const relaunchArgs = () => ({ args: process.argv.slice(1).filter((a) => a !== '--recovered') });
 handle('app:relaunch', () => {
   if (AS_SHELL) return app.exit(65);
-  app.relaunch();
+  app.relaunch(relaunchArgs());
   app.exit(0);
 });
 
@@ -876,7 +899,7 @@ function openStoreSignIn(id) {
   updateEmu();
   let done = false;
   const timer = setInterval(async () => {
-    if (done || !signInWin) return;
+    if (done || !signInWin || signInWin.isDestroyed()) return;
     try {
       const st = await c.status(ses, stores.ctx(id));
       if (st.signedIn && !done && (!c.client || st.mode === 'store')) { // client stores: wait for a real store sign-in
@@ -887,8 +910,10 @@ function openStoreSignIn(id) {
       }
     } catch { /* still signing in */ }
   }, 2500);
+  const thisWin = signInWin;
   signInWin.on('closed', () => {
     clearInterval(timer);
+    if (signInWin !== thisWin) return; // replaced by a newer sign-in window
     signInWin = null;
     updateEmu();
     broadcast('stores:updated');
@@ -953,7 +978,9 @@ handle('logs:open', async () => {
 handle('renderer:error', (e, msg) => { console.error('[renderer]', String(msg).slice(0, 2000)); return true; });
 handle('backups:list', () => backups.list());
 handle('backups:create', () => backups.create('manual'));
-handle('backups:restore', (e, id) => { backups.restore(id); setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(); app.exit(0); } }, 600); return true; });
+// Restored files must not be overwritten by a pending save in the moment before the restart.
+function freezeStores() { for (const st of [settings, library.lib, library.user, emulation.state, stores.state]) { try { st.freeze(); } catch { /* ignore */ } } }
+handle('backups:restore', (e, id) => { backups.restore(id); freezeStores(); setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(relaunchArgs()); app.exit(0); } }, 600); return true; });
 handle('backups:export', async () => {
   main.setAlwaysOnTop(false);
   const r = await dialog.showSaveDialog(main, { title: 'Export a backup', defaultPath: path.join(app.getPath('documents'), `Project 360 backup ${new Date().toISOString().slice(0, 10)}.p360backup`), filters: [{ name: 'Project 360 backup', extensions: ['p360backup'] }] });
@@ -967,7 +994,8 @@ handle('backups:import', async () => {
   if (coverOn()) main.setAlwaysOnTop(true, 'normal');
   if (r.canceled || !r.filePaths[0]) return null;
   backups.importFrom(r.filePaths[0]);
-  setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(); app.exit(0); } }, 600);
+  freezeStores();
+  setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(relaunchArgs()); app.exit(0); } }, 600);
   return r.filePaths[0];
 });
 handle('update:status', () => ({ ...updater.status, configured: updater.configured(), packaged: app.isPackaged, repo: updater.repo() }));
@@ -1080,13 +1108,22 @@ app.whenReady().then(() => {
   createCurtain();
   const recoveredToast = () => toast({ kind: 'orb', icon: 'restart', title: 'Dashboard recovered', text: 'Something went wrong and was fixed automatically', sound: 'toast' });
   reliability.guardWindow(main, 'dashboard', { onRecovered: recoveredToast });
-  reliability.guardWindow(overlay, 'overlay');
+  reliability.guardWindow(overlay, 'overlay', {
+    onRecovered: () => {
+      overlayGuideOpen = false;
+      overlayToasts = false;
+      if (overlay && !overlay.isDestroyed()) { overlay.setIgnoreMouseEvents(true); overlay.hide(); }
+      updateEmu();
+    },
+  });
   try { backups.autoDaily(); } catch (e) { console.warn('[backup] daily backup failed:', e.message); }
   updater.blocked = () => !!launcher.current; // never interrupt a game
   updater.on('status', (st) => broadcast('update:status', st));
   updater.on('ready', (v) => toast({ kind: 'orb', icon: 'restart', title: `Update ${v} ready`, text: 'Installs when you restart · System › Updates', sound: 'toast', duration: 6000 }));
   updater.on('installing', () => { try { backups.create('update'); } catch { /* ignore */ } });
   updater.init();
+  // Warm up the Bluetooth/Wi-Fi helper so System › Bluetooth opens instantly.
+  setTimeout(() => radio.prewarm(), 8000);
   registerShortcuts();
   if (settings.get('console.startWithWindows')) system.setStartup(true);
   setTimeout(() => maybeRescan(true), 800);
@@ -1108,5 +1145,6 @@ app.on('will-quit', () => {
   if (taskbarHidden) native.call('taskbar.show').catch(() => {});
   native.stop();
   radio.stop();
+  if (AS_SHELL && updater.installing) app.exit(66); // shell launcher waits for the installer, then relaunches
 });
 process.on('uncaughtException', (e) => console.error('[main] uncaught', e));

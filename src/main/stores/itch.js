@@ -6,7 +6,7 @@ const API = 'https://api.itch.io';
 const KEY_RE = /^[A-Za-z0-9]{32,64}$/;
 // Electron's session fetch throws on a refused redirect (signed-out pages redirect to login).
 async function get(ses, url) {
-  try { return await ses.fetch(url, { redirect: 'manual' }); }
+  try { return await ses.fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); }
   catch (e) { if (/redirect/i.test(e.message)) return { status: 302, ok: false, json: async () => ({}) }; throw e; }
 }
 
@@ -58,18 +58,21 @@ module.exports = {
     return keys[0] || null;
   },
 
-  async status(ses, ctx) {
+  async status(ses, ctx, retried = false) {
     const key = await this.apiKey(ses, ctx);
     if (key) {
-      const r = await fetch(`${API}/profile`, { headers: { Authorization: `Bearer ${key}` } });
+      const r = await fetch(`${API}/profile`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
       if (r.ok) { const j = await r.json(); return { signedIn: true, user: (j.user && (j.user.display_name || j.user.username)) || '' }; }
+      // Only a rejected key is thrown away; an outage (5xx / 429) keeps it and reports the error.
+      if (r.status !== 401 && r.status !== 403) return { signedIn: false, error: `itch.io is having trouble (HTTP ${r.status}). Try again later.` };
       ctx.setKey('');
     }
+    if (retried) return { signedIn: false, error: 'Signed in, but itch.io didn’t accept the API key.' };
     // Signed in on the site but no key yet? Try to read/create one now.
     const r = await get(ses, 'https://itch.io/user/settings/api-keys');
     if (r.status !== 200) return { signedIn: false };
     const k = await this.apiKey(ses, ctx, { create: true });
-    return k ? this.status(ses, ctx) : { signedIn: false, error: 'Signed in, but no API key could be created. Add one in itch.io › Settings › API keys.' };
+    return k ? this.status(ses, ctx, true) : { signedIn: false, error: 'Signed in, but no API key could be created. Add one in itch.io › Settings › API keys.' };
   },
 
   async library(ses, ctx) {
@@ -78,7 +81,7 @@ module.exports = {
     const out = [];
     const seen = new Set();
     for (let page = 1; page <= 50; page++) {
-      const r = await fetch(`${API}/profile/owned-keys?page=${page}`, { headers: { Authorization: `Bearer ${key}` } });
+      const r = await fetch(`${API}/profile/owned-keys?page=${page}`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
       if (!r.ok) throw new Error(`itch.io API error ${r.status}`);
       const j = await r.json();
       const list = j.owned_keys || [];
@@ -104,7 +107,7 @@ module.exports = {
   async downloads(ses, game, ctx) {
     const key = await this.apiKey(ses, ctx, { create: true });
     if (!key) throw new Error('Not signed in to itch.io');
-    const r = await fetch(`${API}/games/${game.id}/uploads?download_key_id=${game.keyId}`, { headers: { Authorization: `Bearer ${key}` } });
+    const r = await fetch(`${API}/games/${game.id}/uploads?download_key_id=${game.keyId}`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`itch.io API error ${r.status}`);
     const j = await r.json();
     const ups = (j.uploads || []).filter((u) => (u.traits || []).includes('p_windows') || /\.(exe|zip|msi)$/i.test(u.filename || ''));

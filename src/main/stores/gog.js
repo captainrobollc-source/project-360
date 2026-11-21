@@ -2,7 +2,7 @@
 const BASE = 'https://www.gog.com';
 // Electron's session fetch throws on a refused redirect (signed-out pages redirect to login).
 async function get(ses, url) {
-  try { return await ses.fetch(url, { redirect: 'manual' }); }
+  try { return await ses.fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) }); }
   catch (e) { if (/redirect/i.test(e.message)) return { status: 302, ok: false, json: async () => ({}) }; throw e; }
 }
 
@@ -21,7 +21,7 @@ module.exports = {
   about: 'DRM-free games you own on GOG.com. Installers download and install silently.',
 
   async status(ses) {
-    const j = await (await ses.fetch(`${BASE}/userData.json`)).json();
+    const j = await (await ses.fetch(`${BASE}/userData.json`, { signal: AbortSignal.timeout(15000) })).json();
     return { signedIn: !!j.isLoggedIn, user: j.username || '' };
   },
 

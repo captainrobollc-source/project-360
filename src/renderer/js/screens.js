@@ -4,7 +4,7 @@ import { orb, avatar, icon, iconEl, AVATARS } from './icons.js';
 import * as nav from './nav.js';
 import * as sound from './sound.js';
 import * as store from './store.js';
-import { modal, button, osk } from './components/modal.js';
+import { modal, button, osk, avatarPicker } from './components/modal.js';
 import { THEMES, apply as applyTheme } from './theme.js';
 import { lastSlot } from './input.js';
 
@@ -40,10 +40,15 @@ export function playBoot(stage) {
 export function signIn({ allowCancel = false, slot = lastSlot } = {}) {
   return new Promise((resolve) => {
     let renderProfiles = () => {}; // set once the panel is built (modal() calls build synchronously)
+    const ref = { m: null };
     const m = modal({
       panelClass: 'dialog signin',
       sound: 'guide',
-      prompts: () => [{ btn: 'a', label: 'Sign in' }, ...(allowCancel ? [{ btn: 'b', label: 'Back' }] : []), { btn: 'x', label: 'Delete profile', side: 'right' }],
+      prompts: () => {
+        const cur = ref.m && ref.m.focus.current; // prompts render before modal() returns
+        return [{ btn: 'a', label: cur && !cur._pid ? 'Select' : 'Sign in' }, ...(allowCancel ? [{ btn: 'b', label: 'Back' }] : []),
+          ...(cur && cur._pid ? [{ btn: 'x', label: 'Delete profile', side: 'right' }] : [])];
+      },
       handle(a) {
         if (a === 'b' && !allowCancel) return true;
         if (a === 'x' && m.focus.current && m.focus.current._pid) { removeProfile(m.focus.current._pid); return true; }
@@ -54,6 +59,7 @@ export function signIn({ allowCancel = false, slot = lastSlot } = {}) {
         panel.append(h('h3', {}, `Sign In · Player ${slot + 1}`), h('div.sub', { html: `${icon('controller')}<span>Choose a profile for this controller</span>` }));
         const grid = h('div.profiles');
         panel.append(grid);
+        let signingIn = false;
         const render = async () => {
           const list = await window.p360.profiles.list();
           grid.replaceChildren();
@@ -62,7 +68,11 @@ export function signIn({ allowCancel = false, slot = lastSlot } = {}) {
             const c = h('div.pcard', { 'data-focus': '' }, avatar(p.avatar || 0), h('div.n', {}, p.gamertag),
               h('div.g', {}, h('span.gcoin', {}, 'G'), `${p.score || 0}`, elsewhere ? `  ·  on Player ${elsewhere.slot + 1}` : ''));
             c._pid = p.id;
-            c._activate = async () => { const s = await window.p360.profiles.signIn(p.id, slot); store.set('settings', s); close(p.id); };
+            c._activate = async () => {
+              if (signingIn) return; // a second A while the first is in flight
+              signingIn = true;
+              try { const s = await window.p360.profiles.signIn(p.id, slot); store.set('settings', s); close(p.id); } finally { signingIn = false; }
+            };
             grid.append(c);
             const mine = (store.state.slots || []).find((x) => x.slot === slot);
             if (mine ? p.id === mine.profileId : p.id === store.setting('activeProfile')) focus.set(c);
@@ -83,12 +93,17 @@ export function signIn({ allowCancel = false, slot = lastSlot } = {}) {
         await render();
       },
     });
+    ref.m = m;
+    nav.refreshPrompts();
     async function removeProfile(id) {
       const { confirm } = await import('./components/modal.js');
       const ok = await confirm({ title: 'Delete this profile?', text: 'Its playtime, favorites and achievements are removed. Your games stay installed.', buttons: [{ label: 'Delete', value: true, danger: true }, { label: 'Cancel', value: false }] });
       if (!ok) return;
-      try { await window.p360.profiles.remove(id); } catch (e) { store.toast && store.toast({ title: e.message, sound: 'error' }); }
-      renderProfiles();
+      try { await window.p360.profiles.remove(id); } catch (e) {
+        await confirm({ title: 'Couldn’t delete the profile', text: e.message, buttons: [{ label: 'OK', value: true }] });
+      }
+      await renderProfiles();
+      if (m.focus.current && !m.focus.current.isConnected) m.focus.first();
     }
   });
 }
@@ -113,20 +128,19 @@ export function runSetup(stage, { toast }) {
         const p = store.state.settings.profile;
         const pic = avatar(p.avatar || 0);
         const row = h('div.hero-row', {}, pic, h('div', {}, h('div', { style: { fontSize: '44px', fontWeight: 600 } }, p.gamertag), h('div', { style: { fontSize: '20px', opacity: 0.6 } }, 'Your gamertag and gamer picture')));
-        const cycle = async (d) => {
-          const n = ((store.setting('profile.avatar') || 0) + d + AVATARS.length) % AVATARS.length;
+        const choosePic = async () => {
+          const n = await avatarPicker({ current: store.setting('profile.avatar') || 0 });
+          if (n === null) return;
           store.set('settings', await window.p360.settings.set('profile.avatar', n));
-          sound.play('tick');
-          render();
+          render({ keepFocus: true });
         };
-        const picBtn = button('Change gamer picture', { icon: 'image', right: '◀ ▶', onActivate: () => cycle(1) });
-        picBtn._adjust = cycle;
+        const picBtn = button('Change gamer picture', { icon: 'image', onActivate: choosePic });
         return {
           title: 'Your profile',
           body: 'This is how you’ll show up on the dashboard.',
           extra: row,
           opts: [
-            button('Change gamertag', { icon: 'user', onActivate: async () => { const v = await osk({ title: 'Gamertag', value: p.gamertag, maxLength: 15 }); if (v && v.trim()) { store.set('settings', await window.p360.settings.set('profile.gamertag', v.trim())); render(); } } }),
+            button('Change gamertag', { icon: 'user', onActivate: async () => { const v = await osk({ title: 'Gamertag', value: p.gamertag, maxLength: 15 }); if (v && v.trim()) { store.set('settings', await window.p360.settings.set('profile.gamertag', v.trim())); render({ keepFocus: true }); } } }),
             picBtn,
             button('Continue', { icon: 'play', onActivate: next }),
           ],
@@ -192,8 +206,16 @@ export function runSetup(stage, { toast }) {
       }),
     ];
 
-    async function render() {
-      const s = await steps[step]();
+    // Steps can await (e.g. Game Bar status). A newer render wins, and input waits for it.
+    let renderToken = 0;
+    let rendering = false;
+    async function render({ keepFocus = false } = {}) {
+      const my = ++renderToken;
+      const keepIdx = keepFocus && focus.current ? [...panel.querySelectorAll('.opts [data-focus]')].indexOf(focus.current) : -1;
+      rendering = true;
+      let s;
+      try { s = await steps[step](); } finally { if (my === renderToken) rendering = false; }
+      if (my !== renderToken) return;
       panel.replaceChildren(...[
         h('div.step', {}, `Initial setup · ${step + 1} of ${steps.length}`),
         h('div.orbbig', {}, orb()),
@@ -202,9 +224,9 @@ export function runSetup(stage, { toast }) {
         s.extra,
         h('div.opts', {}, ...s.opts),
         h('div.dots', {}, ...steps.map((_, i) => h(`i${i <= step ? '.on' : ''}`)))].filter(Boolean));
-      focus.set(s.opts[0]);
+      focus.set(s.opts[keepIdx >= 0 && keepIdx < s.opts.length ? keepIdx : 0]);
     }
-    function next() { if (step < steps.length - 1) { step++; sound.play('blade', { dir: 1 }); render(); } }
+    function next() { if (rendering) return; if (step < steps.length - 1) { step++; sound.play('blade', { dir: 1 }); render(); } }
     function finish() {
       nav.pop(layer);
       window.p360.settings.set('console.setupDone', true).then((s) => store.set('settings', s));
@@ -241,6 +263,8 @@ export function createSaver(stage) {
 
   function show() {
     if (el || store.state.suspended || !minutes()) return;
+    // Watching a video or slideshow: not idle. Check again later.
+    if (document.body.classList.contains('viewer-open')) { timer = setTimeout(show, 60000); return; }
     const o = orb();
     const clock = h('div.sclock');
     el = h('div.saver', {}, o, clock);

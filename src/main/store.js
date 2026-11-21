@@ -62,13 +62,18 @@ class JsonStore {
   replace(data) { this.data = data; this.save(); }
 
   save() {
+    if (this.frozen) return;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.flush(), 400);
   }
 
+  // After a backup restore the files on disk are the truth: stop writing until the restart.
+  freeze() { this.frozen = true; clearTimeout(this.timer); this.timer = null; }
+
   flush() {
     clearTimeout(this.timer);
     this.timer = null;
+    if (this.frozen) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = this.file + '.tmp';

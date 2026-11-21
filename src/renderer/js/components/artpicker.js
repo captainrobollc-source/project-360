@@ -14,7 +14,7 @@ export async function openArtPicker(game, { toast } = {}) {
     sound: 'guide',
     prompts: () => [{ btn: 'a', label: 'Use this artwork' }, { btn: 'b', label: 'Cancel' }],
     build(panel, close, focus) {
-      const grid = h('div.cands');
+      const grid = h('div.cands', { 'data-scroll': '' });
       for (const c of results.slice(0, 30)) {
         const frame = h('div.frame');
         const [a, b] = fallbackColors(c.title || c.id);

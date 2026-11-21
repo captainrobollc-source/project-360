@@ -153,7 +153,14 @@ export function marketBlade(ctx) {
     });
   }
 
+  // One options request / menu at a time (a second A while it loads would stack two menus).
+  let optionsBusy = false;
   async function gameOptions(store, g) {
+    if (optionsBusy) return;
+    optionsBusy = true;
+    try { await gameOptionsInner(store, g); } finally { optionsBusy = false; }
+  }
+  async function gameOptionsInner(store, g) {
     if (installedLocal(store, g)) {
       const local = state.library.find((x) => x.id === g.localId) || state.library.find((x) => norm(x.title) === norm(g.title));
       if (local) { ctx.goto('games'); return; }

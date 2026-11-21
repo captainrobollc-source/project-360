@@ -15,13 +15,25 @@ const Z_BASE = 260;
 let openCount = 0;
 let zTop = Z_BASE;
 
+// Overlay layers (modals, the Guide, the viewer) take the next z-index up, so whatever opened
+// last is on top. While any is open the prompt bar rides above them all.
+export function claimLayer() {
+  if (openCount++ === 0) zTop = Z_BASE;
+  zTop += 2;
+  document.body.classList.add('has-layer');
+  return zTop;
+}
+export function releaseLayer() {
+  openCount = Math.max(0, openCount - 1);
+  if (!openCount) document.body.classList.remove('has-layer');
+}
+
 export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, scrim = true, sound: openSound = null }) {
   const scrimEl = scrim ? h('div.scrim') : null;
   const panel = h(`div.${panelClass.split(' ').join('.')}`);
-  if (openCount++ === 0) zTop = Z_BASE;
-  zTop += 2;
-  if (scrimEl) scrimEl.style.zIndex = String(zTop - 1);
-  panel.style.zIndex = String(zTop);
+  const z = claimLayer();
+  if (scrimEl) scrimEl.style.zIndex = String(z - 1);
+  panel.style.zIndex = String(z);
   if (scrimEl) root.append(scrimEl);
   root.append(panel);
   const focus = new nav.Focus(panel);
@@ -41,7 +53,7 @@ export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, 
   function close(value) {
     if (closed) return;
     closed = true;
-    openCount = Math.max(0, openCount - 1);
+    releaseLayer();
     nav.pop(layer);
     panel.classList.remove('in');
     if (scrimEl) scrimEl.classList.remove('in');

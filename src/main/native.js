@@ -40,12 +40,17 @@ class NativeHelper extends EventEmitter {
     this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', (chunk) => this.onData(chunk));
     this.proc.stderr.on('data', (d) => console.error(`[${this.label}]`, d.toString().trim()));
+    const proc = this.proc;
+    this.proc.on('error', (e) => console.error(`[${this.label}] helper failed to start`, e.message));
     this.proc.on('exit', (code) => {
+      if (this.proc === proc) this.proc = null;
       this.ready = false;
-      for (const { reject } of this.pending.values()) reject(new Error('helper exited'));
+      this.buffer = '';
+      for (const { reject, timer } of this.pending.values()) { clearTimeout(timer); reject(new Error('helper exited')); }
       this.pending.clear();
       if (this.stopping) return;
       console.warn(`[${this.label}] helper exited`, code);
+      this.emit('exit', code); // lets main re-apply state the helper owned (taskbar, controller mouse)
       if (this.restarts++ < 5) setTimeout(() => this.start(), 1000 * this.restarts);
     });
   }
@@ -73,7 +78,7 @@ class NativeHelper extends EventEmitter {
           msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error));
         }
       } else if (msg.ev) {
-        if (msg.ev === 'ready') { this.ready = true; this.info = msg; }
+        if (msg.ev === 'ready') { this.ready = true; this.info = msg; this.restarts = 0; }
         this.emit(msg.ev, msg);
       }
     }

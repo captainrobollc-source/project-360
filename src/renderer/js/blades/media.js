@@ -86,7 +86,7 @@ export function mediaBlade(ctx) {
       const list = h('div.tracklist');
       const cur = music.current();
       tracks.slice(0, 600).forEach((t, i) => {
-        const row = h(`div.track${cur && cur.path === t.path ? '.playing' : ''}`, { 'data-focus': '' }, h('span.n', {}, String(i + 1)), h('span.tt', {}, t.title), h('span.ar', {}, `${t.artist} · ${t.album}`));
+        const row = h(`div.track${cur && cur.path === t.path ? '.playing' : ''}`, { 'data-focus': '', 'data-key': `track:${t.path}` }, h('span.n', {}, String(i + 1)), h('span.tt', {}, t.title), h('span.ar', {}, `${t.artist} · ${t.album}`));
         row._activate = () => { music.playList(tracks, i); };
         list.append(row);
       });
@@ -159,7 +159,7 @@ export function mediaBlade(ctx) {
       const el = split.focus.current;
       if (!split.inPane()) return [{ btn: 'a', label: 'Select' }];
       const p = [{ btn: 'a', label: 'Open' }];
-      if (el && el._item) p.push({ btn: 'x', label: 'Remove' });
+      if (el && el._item && (setting('media.custom') || []).some((c) => (c.title || c.url) === el._item.title)) p.push({ btn: 'x', label: 'Remove' });
       if (split.current() === 'music') p.push({ btn: 'y', label: 'Play / pause' });
       p.push({ btn: 'b', label: 'Back' });
       return p;

@@ -73,6 +73,8 @@ class Library extends EventEmitter {
       const old = this.games();
       const next = {};
       const okSources = new Set();
+      const removed = { ...(this.lib.data.removed || {}) };
+      const wasRemoved = new Set(Object.keys(removed));
       const all = { ...SCANNERS, ...this.extra };
       const results = await Promise.all(Object.entries(all).map(async ([name, s]) => {
         if (SCANNERS[name] ? !cfg[name] : cfg[name] === false) return [name, { ok: true, games: [] }];
@@ -82,7 +84,7 @@ class Library extends EventEmitter {
         if (res.ok) okSources.add(name);
         for (const g of res.games) {
           if (next[g.id]) continue; // first scanner wins (e.g. Steam over a steam:// .url)
-          const prev = old[g.id] || {};
+          const prev = old[g.id] || removed[g.id] || {};
           next[g.id] = {
             ...g,
             addedAt: prev.addedAt || Date.now(),
@@ -100,8 +102,15 @@ class Library extends EventEmitter {
         const src = g.systemId ? 'emulation' : g.source === 'local' || g.source === 'rom' ? 'custom' : g.source;
         if (!next[id] && !okSources.has(src) && cfg[src] !== false) next[id] = g;
       }
-      const added = Object.keys(next).filter((id) => !old[id]);
-      this.lib.replace({ games: next, lastScan: Date.now() });
+      // Games that vanish (drive not mounted yet, Steam rewriting libraryfolders.vdf) keep their
+      // art, metadata and added date for 30 days, so a re-appearance isn't a "new game" re-fetch.
+      const now = Date.now();
+      for (const [id, g] of Object.entries(old)) {
+        if (!next[id]) removed[id] = { addedAt: g.addedAt, art: g.art, meta: g.meta, artTried: g.artTried, artVersion: g.artVersion, artSources: g.artSources, artManual: g.artManual, removedAt: now };
+      }
+      for (const id of Object.keys(removed)) if (next[id] || now - (removed[id].removedAt || 0) > 30 * 86400000) delete removed[id];
+      const added = Object.keys(next).filter((id) => !old[id] && !wasRemoved.has(id));
+      this.lib.replace({ games: next, lastScan: now, removed });
       this.emit('changed');
       this.emit('scanned', { added, total: Object.keys(next).length, notes: results.filter(([, r]) => r.note).map(([n, r]) => `${n}: ${r.note}`) });
       return { added: added.length, total: Object.keys(next).length };

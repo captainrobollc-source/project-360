@@ -32,8 +32,10 @@ async function launchExplorer() {
 async function power(action) {
   switch (action) {
     case 'sleep':
-      try { await native.call('power.sleep'); }
-      catch { execFile('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0'], { windowsHide: true }); }
+      // The helper's call can block until the PC wakes, so give it a long timeout and only fall
+      // back when the helper isn't there at all (otherwise we'd sleep again right after waking).
+      try { await native.callT(10 * 60 * 1000, 'power.sleep'); }
+      catch (e) { if (/not running/.test(e.message)) execFile('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0'], { windowsHide: true }); }
       return true;
     case 'restart':
       execFile('shutdown.exe', ['/r', '/t', '0'], { windowsHide: true });

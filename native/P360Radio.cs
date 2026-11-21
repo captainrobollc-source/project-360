@@ -213,14 +213,23 @@ namespace P360Radio
         {
             var list = new Dictionary<string, DeviceInformation>();
             var done = new TaskCompletionSource<bool>();
+            long lastChange = Environment.TickCount;
             var w = DeviceInformation.CreateWatcher(Selector(true), Props, DeviceInformationKind.AssociationEndpoint);
-            w.Added += (s, d) => { lock (list) list[d.Id] = d; };
-            w.Updated += (s, u) => { lock (list) { DeviceInformation d; if (list.TryGetValue(u.Id, out d)) d.Update(u); } };
+            w.Added += (s, d) => { lock (list) list[d.Id] = d; Interlocked.Exchange(ref lastChange, Environment.TickCount); };
+            w.Updated += (s, u) => { lock (list) { DeviceInformation d; if (list.TryGetValue(u.Id, out d)) d.Update(u); } Interlocked.Exchange(ref lastChange, Environment.TickCount); };
             w.Removed += (s, u) => { lock (list) list.Remove(u.Id); };
             w.EnumerationCompleted += (s, o) => done.TrySetResult(true);
+            int start = Environment.TickCount;
             w.Start();
-            await Task.WhenAny(done.Task, Task.Delay(2000));
-            await Task.Delay(300); // late connection-state updates
+            // Known devices arrive straight from the cache: stop once they've been quiet for 350 ms
+            // (at least 300 ms in, at most 2 s).
+            while (!done.Task.IsCompleted)
+            {
+                await Task.Delay(50);
+                int now = Environment.TickCount;
+                if (now - start >= 2000) break;
+                if (now - start >= 300 && now - Interlocked.Read(ref lastChange) >= 350) break;
+            }
             try { w.Stop(); } catch { /* stopping */ }
             lock (list) return "[" + string.Join(",", list.Values.Where(d => !string.IsNullOrEmpty(d.Name)).Select(Dev)) + "]";
         }

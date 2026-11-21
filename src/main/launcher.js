@@ -93,8 +93,14 @@ class Launcher extends EventEmitter {
         const err = await shell.openPath(L.target);
         if (err) throw new Error(err);
       } else {
-        const child = spawn(L.target, L.args || [], { cwd: L.cwd, detached: true, stdio: 'ignore' });
-        child.on('error', (e) => this.emit('error', e));
+        if (path.isAbsolute(L.target) && !fs.existsSync(L.target)) throw new Error(`Can't find ${path.basename(L.target)}. The game may have been moved or uninstalled.`);
+        const cwd = L.cwd && fs.existsSync(L.cwd) ? L.cwd : undefined;
+        const child = spawn(L.target, L.args || [], { cwd, detached: true, stdio: 'ignore' });
+        child.on('error', (e) => {
+          c.childAlive = false;
+          console.error('[launcher] spawn failed', e.message);
+          if (this.current === c) { this.current = null; this.last = { id: null, at: 0 }; this.emitState(); this.emit('failed', { item: c.item, error: e.message }); }
+        });
         c.childPid = child.pid;
         c.childAlive = true;
         child.on('exit', () => { c.childAlive = false; });
@@ -118,13 +124,17 @@ class Launcher extends EventEmitter {
     return [(w.dirs || []).join('|'), (w.exes || []).join('|')];
   }
 
-  async findPids() {
-    const c = this.current;
+  // Returns null when the process lookup itself failed (helper restarting), so callers can skip
+  // a tick instead of treating "couldn't look" as "the game exited".
+  async findPids(c = this.current) {
     const pids = new Set();
+    if (!c) return pids;
     if (c.childAlive && c.childPid) pids.add(c.childPid);
-    const [dirs, exes] = this.watchArgs();
+    const w = c.item.watch || {};
+    const dirs = (w.dirs || []).join('|');
+    const exes = (w.exes || []).join('|');
     if (dirs || exes) {
-      try { for (const p of await native.call('procs.find', dirs, exes)) pids.add(p.pid); } catch { /* rely on child pid */ }
+      try { for (const p of await native.call('procs.find', dirs, exes)) pids.add(p.pid); } catch { if (!pids.size) return null; }
     }
     return pids;
   }
@@ -190,8 +200,9 @@ class Launcher extends EventEmitter {
     if (!c || c.phase === 'exited') return;
     this.timer = setTimeout(async () => {
       if (this.current !== c) return;
-      const pids = await this.findPids();
+      const pids = await this.findPids(c);
       if (this.current !== c) return;
+      if (pids === null) { this.poll(); return; } // helper unavailable: try again next tick
       const now = Date.now();
       if (pids.size) {
         c.pids = pids;
@@ -304,20 +315,24 @@ class Launcher extends EventEmitter {
     const c = this.current;
     if (!c) return false;
     if (c.handle) { c.handle.close(); this.finish('killed'); return true; }
-    let pids = new Set([...(await this.findPids()), ...c.pids]);
+    // Work on this game's own record: its window closing can finish() it mid-way, and the
+    // leftover processes still need killing.
+    let pids = new Set([...((await this.findPids(c)) || []), ...c.pids]);
     if (pids.size) {
       try { await native.call('wins.close', [...pids].join('|')); } catch { /* ignore */ }
       const until = Date.now() + graceMs;
       while (Date.now() < until) {
         await new Promise((r) => setTimeout(r, 300));
-        pids = await this.findPids();
+        const now = await this.findPids(c);
+        if (now === null) continue;
+        pids = now;
         if (!pids.size) break;
       }
     }
     await Promise.all([...pids].map((pid) => new Promise((resolve) => {
       execFile('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve());
     })));
-    this.finish('killed');
+    if (this.current === c) this.finish('killed');
     return true;
   }
 

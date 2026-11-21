@@ -6,6 +6,9 @@
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
+let electronNet = null;
+try { ({ net: electronNet } = require('electron')); } catch { /* unit tests / plain node */ }
+const online = () => { try { return !electronNet || electronNet.isOnline(); } catch { return true; } };
 const U = require('./art/util');
 const S = require('./art/sources');
 const R = require('./art/retro');
@@ -84,7 +87,9 @@ class ArtManager extends EventEmitter {
         if (!g.art || !g.art[k]) continue;
         try {
           const f = this.file(g.id, k);
-          const bad = old ? !!checkImage(k, fs.readFileSync(f), { loose: true }) : tooSmall(k, fs.statSync(f).size);
+          // Current-version art already passed checkImage when it was saved (small ROM snaps and
+          // user picks pass loosely), so only catch truncated files here, or it re-fetches forever.
+          const bad = old ? !!checkImage(k, fs.readFileSync(f), { loose: true }) : fs.statSync(f).size < 800;
           if (bad) { delete g.art[k]; g.artTried = 0; dirty = true; }
         } catch { delete g.art[k]; g.artTried = 0; dirty = true; }
       }
@@ -226,8 +231,9 @@ class ArtManager extends EventEmitter {
       if (!g.steamAppId) list.push(() => S.steamSearch(g.title));
       list.push(() => S.msSearch(g.title));
     }
-    if (key) list.push(() => S.steamGridDb(key, g));
-    if (igdbId && igdbSecret) list.push(() => S.igdbSearch(igdbId, igdbSecret, g.title));
+    // SteamGridDB / IGDB title searches: same rule (a Steam id lookup is still fine for ROMs).
+    if (key && (src !== 'rom' || g.steamAppId)) list.push(() => S.steamGridDb(key, g));
+    if (igdbId && igdbSecret && src !== 'rom') list.push(() => S.igdbSearch(igdbId, igdbSecret, g.title));
     return list;
   }
 
@@ -254,6 +260,9 @@ class ArtManager extends EventEmitter {
   async process({ id, force }) {
     const g = this.library.game(id);
     if (!g) return;
+    // Offline (e.g. Wi-Fi not up yet at boot): don't record "tried, nothing found" for 3 days,
+    // and never let a forced refresh replace good art with nothing. The next scan retries.
+    if (!online()) return;
     const t0 = Date.now();
     const art = force ? {} : { ...(g.art || {}) };
     let meta = force ? null : g.meta;
@@ -304,6 +313,11 @@ class ArtManager extends EventEmitter {
     }
 
     const live = this.library.game(id) || g;
+    if (force) {
+      // A refresh that found nothing better keeps what it had (files are only overwritten by new finds).
+      for (const k of KINDS) if (!art[k] && g.art && g.art[k] && fs.existsSync(path.join(dir, k))) art[k] = g.art[k];
+      if (!meta && g.meta) meta = g.meta;
+    }
     if ((this.manualAt.get(id) || 0) > t0) {
       // A manual pick landed while we were working; keep its kinds.
       for (const k of KINDS) if (live.art && live.art[k] && live.art[k] > t0) art[k] = live.art[k];

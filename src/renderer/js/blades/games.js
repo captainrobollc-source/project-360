@@ -106,6 +106,7 @@ export function gamesBlade(ctx) {
       let el = pool.get(g.id);
       if (!el) {
         const tile = coverTile(g);
+        tile.removeAttribute('data-focus'); // the carousel keeps one focus target (carFocus); mouse hover mustn't steal it
         el = h('div.ci.reflect', {}, tile);
         el.addEventListener('click', () => { const i = games.indexOf(g); if (i === idx) launchGame(g.id); else { idx = i; layoutCarousel(); } });
         const t0 = transformFor(d > 0 ? d + 1 : d - 1);
@@ -240,7 +241,7 @@ export function gamesBlade(ctx) {
     prompts() {
       return curId()
         ? [{ btn: 'a', label: 'Play' }, { btn: 'x', label: 'Details' }, { btn: 'y', label: 'Find & sort' }, { btn: 'dpad', label: 'Shelves' }]
-        : [{ btn: 'a', label: 'Open shelf' }, { btn: 'y', label: 'Find & sort' }];
+        : [...(games.length ? [{ btn: 'a', label: 'Open shelf' }] : []), { btn: 'y', label: 'Find & sort' }];
     },
     handle(action) {
       const onCar = focus.current === carFocus;

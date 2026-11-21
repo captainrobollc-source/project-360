@@ -88,9 +88,34 @@ export function scrollIntoScroller(el) {
   const sr = sc.getBoundingClientRect();
   const er = el.getBoundingClientRect();
   const scale = sr.height / sc.offsetHeight || 1;
-  const pad = 70 * scale;
-  if (er.top < sr.top + pad) sc.scrollTop -= (sr.top + pad - er.top) / scale;
-  else if (er.bottom > sr.bottom - pad) sc.scrollTop += (er.bottom - (sr.bottom - pad)) / scale;
+  const pad = 70;
+  // Positions in the scroller's own (unscaled) coordinates.
+  const top = (er.top - sr.top) / scale + sc.scrollTop;
+  const bottom = (er.bottom - sr.top) / scale + sc.scrollTop;
+  const view = sc.clientHeight;
+  const max = Math.max(0, sc.scrollHeight - view);
+  const focusables = [...sc.querySelectorAll('[data-focus]')].filter(visible);
+  let target = sc.scrollTop;
+  if (top < sc.scrollTop + pad) target = top - pad;
+  else if (bottom > sc.scrollTop + view - pad) target = bottom - view + pad;
+  // First / last focusable: also reveal the headers above or the info rows below it,
+  // as long as the focused element itself stays in view.
+  if (focusables[0] === el) target = Math.min(target, Math.max(0, bottom + pad - view));
+  if (focusables[focusables.length - 1] === el) target = Math.max(target, Math.min(max, top - pad));
+  sc.scrollTop = Math.max(0, Math.min(max, target));
+}
+
+// Scroll a non-focusable block (e.g. results that just appeared) into its scroller's view.
+export function revealInScroller(el) {
+  const sc = el && el.closest('[data-scroll]');
+  if (!sc) return;
+  const sr = sc.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  const scale = sr.height / sc.offsetHeight || 1;
+  const bottom = (er.bottom - sr.top) / scale + sc.scrollTop;
+  const top = (er.top - sr.top) / scale + sc.scrollTop;
+  const want = Math.min(top - 40, bottom - sc.clientHeight + 40);
+  if (want > sc.scrollTop) sc.scrollTop = Math.min(want, sc.scrollHeight - sc.clientHeight);
 }
 
 // Focus manager for one root. Focusable elements carry [data-focus].
