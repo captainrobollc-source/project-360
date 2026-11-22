@@ -308,17 +308,17 @@ class ArtManager extends EventEmitter {
     }
     current = null;
 
+    if (force) {
+      // A refresh that found nothing better keeps what it had (files are only overwritten by new finds).
+      for (const k of KINDS) if (!art[k] && g.art && g.art[k] && fs.existsSync(path.join(dir, k))) art[k] = g.art[k];
+      if (!meta && g.meta) meta = g.meta;
+    }
     // Banner fallback: reuse the hero so wide tiles never look empty.
     if (!art.banner && art.hero) {
       try { fs.copyFileSync(path.join(dir, 'hero'), path.join(dir, 'banner')); art.banner = Date.now(); used.banner = used.hero; } catch { /* ignore */ }
     }
 
     const live = this.library.game(id) || g;
-    if (force) {
-      // A refresh that found nothing better keeps what it had (files are only overwritten by new finds).
-      for (const k of KINDS) if (!art[k] && g.art && g.art[k] && fs.existsSync(path.join(dir, k))) art[k] = g.art[k];
-      if (!meta && g.meta) meta = g.meta;
-    }
     if ((this.manualAt.get(id) || 0) > t0) {
       // A manual pick landed while we were working; keep its kinds.
       for (const k of KINDS) if (live.art && live.art[k] && live.art[k] > t0) art[k] = live.art[k];

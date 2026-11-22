@@ -117,6 +117,7 @@ contextBridge.exposeInMainWorld('p360', {
     detach: () => call('launcher:detach'),
     showAttention: () => call('launcher:showAttention'),
     showDashboard: (blade) => call('launcher:showDashboard', blade),
+    launchFromDashboard: (id) => call('launcher:launchFromDashboard', id),
   },
   overlay: {
     guideClosed: () => call('overlay:guideClosed'),
@@ -124,7 +125,7 @@ contextBridge.exposeInMainWorld('p360', {
   },
   app: { quit: () => call('app:quit'), relaunch: () => call('app:relaunch') },
   arcade: {
-    board: (key) => call('arcade:board', key),
+    board: (key, pid) => call('arcade:board', key, pid),
     finish: (key, result) => call('arcade:finish', key, result),
   },
   logs: { tail: () => call('logs:tail'), open: () => call('logs:open'), error: (msg) => call('renderer:error', msg) },

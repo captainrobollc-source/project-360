@@ -30,11 +30,16 @@ function ensure() {
 // BLE side of AirPods or a controller). Hide those from "Add a device".
 const macOf = (id) => { const m = /([0-9a-f]{2}(?::[0-9a-f]{2}){5})$/i.exec(String(id || '')); return m ? m[1].toLowerCase() : null; };
 const nameKey = (n) => String(n || '').trim().toLowerCase().replace(/[‘’']/g, "'");
-let pairedKeys = { names: new Set(), macs: new Set() };
+let pairedKeys = { classicNames: new Set(), macs: new Set() };
 function rememberPaired(list) {
-  pairedKeys = { names: new Set(list.map((d) => nameKey(d.name))), macs: new Set(list.map((d) => macOf(d.id)).filter(Boolean)) };
+  pairedKeys = {
+    classicNames: new Set(list.filter((d) => !d.ble).map((d) => nameKey(d.name))),
+    macs: new Set(list.map((d) => macOf(d.id)).filter(Boolean)),
+  };
 }
-const isPairedTwin = (dev) => pairedKeys.names.has(nameKey(dev.name)) || pairedKeys.macs.has(macOf(dev.id));
+// Same address = the same device. A name match only counts for the BLE side of a paired classic
+// device (AirPods etc.), so a second identical controller or headset still shows up.
+const isPairedTwin = (dev) => pairedKeys.macs.has(macOf(dev.id)) || (dev.ble && pairedKeys.classicNames.has(nameKey(dev.name)));
 
 // Devices re-report signal strength several times a second; forward only real changes.
 const seen = new Map();

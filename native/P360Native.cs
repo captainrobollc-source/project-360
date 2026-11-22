@@ -967,11 +967,13 @@ namespace P360
         // A game's window still exists and is shown (minimized still counts as alive).
         public static bool Alive(IntPtr h) { return h != IntPtr.Zero && IsWindow(h) && IsWindowVisible(h); }
 
-        public static bool HideWindow(IntPtr h) { return h != IntPtr.Zero && ShowWindow(h, 0 /*SW_HIDE*/); }
+        // Async: a hung window (a stuck launcher) can't block the helper's command thread.
+        [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd, int cmd);
+        public static bool HideWindow(IntPtr h) { return h != IntPtr.Zero && ShowWindowAsync(h, 0 /*SW_HIDE*/); }
 
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         // Bottom of the z-order: covers the desktop but stays behind every other window.
-        public static bool SendToBottom(IntPtr h) { return SetWindowPos(h, new IntPtr(1) /*HWND_BOTTOM*/, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 /*NOSIZE|NOMOVE|NOACTIVATE*/); }
+        public static bool SendToBottom(IntPtr h) { return SetWindowPos(h, new IntPtr(1) /*HWND_BOTTOM*/, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x4000 /*NOSIZE|NOMOVE|NOACTIVATE|ASYNCWINDOWPOS*/); }
 
         // Politely asks every top-level window of the processes to close (WM_CLOSE).
         public static int ClosePids(string pidsArg)

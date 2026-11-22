@@ -8,12 +8,16 @@ const logger = require('./logger');
 let heartbeatFile = null;
 let beatTimer = null;
 
+let exiting = false;
 function markExit() {
+  exiting = true;
+  clearInterval(beatTimer); // a late beat must not overwrite the exit marker
   if (!heartbeatFile) return;
   try { fs.writeFileSync(heartbeatFile, JSON.stringify({ t: Date.now(), state: 'exit' })); } catch { /* ignore */ }
 }
 
 function beat() {
+  if (exiting || !heartbeatFile) return;
   try { fs.writeFileSync(heartbeatFile, JSON.stringify({ t: Date.now(), state: 'ok', pid: process.pid })); } catch { /* ignore */ }
 }
 
@@ -87,4 +91,4 @@ function guardWindow(win, name, { onRecovered } = {}) {
   win.on('responsive', () => clearTimeout(hangTimer));
 }
 
-module.exports = { setup, guardWindow, markExit, logger };
+module.exports = { setup, guardWindow, markExit, beat, logger };

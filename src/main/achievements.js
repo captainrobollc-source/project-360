@@ -158,7 +158,8 @@ class Achievements extends EventEmitter {
     }
   }
 
-  evaluateLibrary(games) {
+  evaluateLibrary(all) {
+    const games = all.filter((g) => g.source !== 'arcade'); // built-in games aren't "your library"
     const visible = games.filter((g) => !g.hidden);
     const n = visible.length;
     if (n >= 10) this.unlock('collector');

@@ -51,7 +51,14 @@ function relaunch(reason) {
 
 log(`watching pid ${pid}${shell ? ' (shell mode)' : ''}`);
 const started = Date.now();
+let lastTick = Date.now();
+let wokeAt = 0;
 setInterval(() => {
+  const nowT = Date.now();
+  // The PC slept (or this process was frozen): the heartbeat is old because time jumped, not
+  // because the dashboard hung. Wait for a fresh beat before judging again.
+  if (nowT - lastTick > POLL_MS * 4) wokeAt = nowT;
+  lastTick = nowT;
   const beat = readBeat();
   if (beat && beat.state === 'exit') { log('clean exit'); process.exit(0); }
   // A newer instance (restart, restore, update) owns the heartbeat now: not ours to watch.
@@ -67,6 +74,7 @@ setInterval(() => {
     return;
   }
   const age = beat ? Date.now() - beat.t : Date.now() - started;
+  if (wokeAt && (!beat || beat.t < wokeAt) && Date.now() - wokeAt < HANG_MS * 2) return;
   if (age > HANG_MS && Date.now() - started > HANG_MS) {
     log(`no heartbeat for ${Math.round(age / 1000)} s — killing hung dashboard`);
     // Not /T: the watchdog itself is in the dashboard's process tree. Renderers and the native

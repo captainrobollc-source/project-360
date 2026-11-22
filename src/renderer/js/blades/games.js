@@ -270,6 +270,7 @@ export function gamesBlade(ctx) {
       if (action === 'x' && curId()) { openDetails(curId(), { toast: ctx.toast }); return true; }
       if (action === 'y') { openMenu(); return true; }
       if (!onCar && (action === 'lt' || action === 'rt')) {
+        if (view() !== 'grid' || !grid.contains(focus.current)) return true;
         const tiles = [...grid.querySelectorAll('.tile')];
         const i = tiles.indexOf(focus.current);
         const t = tiles[Math.max(0, Math.min(tiles.length - 1, i + (action === 'lt' ? -1 : 1) * COLS * 3))];

@@ -27,7 +27,7 @@ class Backups {
     }).sort((a, b) => b.at - a.at);
   }
 
-  create(reason = 'manual') {
+  create(reason = 'manual', keep = null) {
     this.flush();
     const at = Date.now();
     const id = `${new Date(at).toISOString().replace(/[:.]/g, '-')}_${reason}`;
@@ -41,12 +41,12 @@ class Backups {
       size += fs.statSync(src).size;
     }
     fs.writeFileSync(path.join(dest, 'backup.json'), JSON.stringify({ at, reason, version: this.version, size, files: FILES }));
-    this.prune();
+    this.prune(keep);
     return { id, at, reason, size };
   }
 
-  prune() {
-    for (const b of this.list().slice(KEEP)) {
+  prune(keep = null) {
+    for (const b of this.list().filter((x) => x.id !== keep).slice(KEEP)) {
       try { fs.rmSync(path.join(this.dir, b.id), { recursive: true, force: true }); } catch { /* ignore */ }
     }
   }
@@ -61,11 +61,14 @@ class Backups {
   restore(id) {
     const src = path.join(this.dir, path.basename(id));
     if (!fs.existsSync(src)) throw new Error('Backup not found');
-    this.create('before-restore');
+    // Read it first: the safety backup below prunes the oldest one, which may be this one.
+    const files = {};
     for (const f of FILES) {
-      const s = path.join(src, f);
-      if (fs.existsSync(s)) fs.copyFileSync(s, path.join(this.userDir, f));
+      try { files[f] = fs.readFileSync(path.join(src, f)); } catch { /* not in this backup */ }
     }
+    if (!Object.keys(files).length) throw new Error('That backup is empty');
+    this.create('before-restore', path.basename(id)); // and keep the one being restored
+    for (const [f, buf] of Object.entries(files)) fs.writeFileSync(path.join(this.userDir, f), buf);
   }
 
   exportTo(file) {

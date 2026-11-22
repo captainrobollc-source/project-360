@@ -14,6 +14,13 @@ const CONNECTORS = [require('./steam'), require('./epic'), require('./gog'), req
 const CHROME_UA = () => app.userAgentFallback.replace(/\s(Electron|project-360|Project 360)\/\S+/gi, '');
 
 const safeName = (s) => String(s || 'Game').replace(/[<>:"/\\|?*\x00-\x1f™®©]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Game';
+// File names keep their extension (installers are found by it): only the stem is shortened.
+const safeFileName = (s) => {
+  const clean = String(s || 'download.bin').replace(/[<>:"/\\|?*\x00-\x1f™®©]/g, '').replace(/\s+/g, ' ').trim() || 'download.bin';
+  const ext = path.extname(clean).slice(0, 12);
+  const stem = clean.slice(0, clean.length - ext.length).slice(0, 120 - ext.length) || 'download';
+  return stem + ext;
+};
 
 function ps(script) {
   return new Promise((resolve) => {
@@ -203,7 +210,12 @@ class StoreManager extends EventEmitter {
     };
     this.jobs().unshift(job);
     this.changed(true);
-    await c.installClient(game);
+    try { await c.installClient(game); } catch (e) {
+      const i = this.jobs().indexOf(job);
+      if (i >= 0) this.jobs().splice(i, 1);
+      this.changed(true);
+      throw e;
+    }
     this.emit('client', { store: storeId, client: c.client, title: job.title });
     this.watchClient(job, c, game);
     return job.id;
@@ -267,7 +279,9 @@ class StoreManager extends EventEmitter {
       const opt = d.options.find((o) => o.id === job.optionId);
       if (opt) opt.files.forEach((f, i) => { if (job.files[i] && !job.files[i].done) { job.files[i].url = f.url; job.files[i].headers = f.headers; } });
     } catch { /* use the links we have */ }
+    if (job.state !== 'downloading') return; // paused or cancelled while refreshing links
     for (const file of job.files) {
+      if (job.state !== 'downloading') return;
       if (file.done && file.path && fs.existsSync(file.path)) continue;
       await this.downloadFile(job, file);
       if (job.state !== 'downloading') return;
@@ -290,7 +304,8 @@ class StoreManager extends EventEmitter {
     if (!p) return; // a download the user started inside a sign-in window: default behaviour
     this.pending.delete(chain[0]);
     const { job, file, resolve, reject } = p;
-    const name = safeName(item.getFilename() || file.name || 'download.bin').replace(/\s/g, ' ');
+    if (job.state !== 'downloading') { item.cancel(); resolve(); return; }
+    const name = safeFileName(item.getFilename() || file.name || 'download.bin');
     file.path = path.join(job.dir, name);
     item.setSavePath(file.path);
     this.items.set(job.id, item);

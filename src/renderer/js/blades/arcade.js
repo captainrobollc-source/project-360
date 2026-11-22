@@ -22,11 +22,12 @@ export function arcadeBlade(ctx) {
   const panel = h('div.arc-info');
   root.append(shelf, panel);
   const boards = {};
+  const bests = {};
   let current = ORDER[0];
 
   const gameOf = (key) => state.library.find((g) => g.id === `arcade:${key}`) || { id: `arcade:${key}`, title: GAMES[key].title, art: {} };
   const me = () => state.settings.activeProfile;
-  const best = (key) => (boards[key] || []).filter((r) => r.pid === me()).reduce((m, r) => Math.max(m, r.score), 0);
+  const best = (key) => Math.max(bests[key] || 0, (boards[key] || []).filter((r) => r.pid === me()).reduce((m, r) => Math.max(m, r.score), 0));
   const rank = (key) => { const i = (boards[key] || []).findIndex((r) => r.pid === me()); return i >= 0 ? i + 1 : 0; };
 
   const focus = new nav.Focus(root, {
@@ -39,15 +40,19 @@ export function arcadeBlade(ctx) {
   });
 
   async function loadBoards() {
-    await Promise.all(ORDER.map(async (k) => { try { boards[k] = await window.p360.arcade.board(k); } catch { boards[k] = boards[k] || []; } }));
+    await Promise.all(ORDER.map(async (k) => {
+      try { const r = await window.p360.arcade.board(k); boards[k] = r.rows || []; bests[k] = r.best || 0; } catch { boards[k] = boards[k] || []; }
+    }));
     paintShelf();
     paintPanel();
   }
 
   function play(key) {
     sound.play('launch');
-    playArcade(`arcade:${key}`, { onExit: () => loadBoards() });
+    playArcade(`arcade:${key}`);
   }
+  // Scores changed (a run finished, from here, Details or the Guide): refresh.
+  window.p360.on('arcade:updated', () => loadBoards());
 
   function paintShelf() {
     const focusedKey = focus.current && focus.current.dataset.key;
@@ -126,7 +131,8 @@ export function arcadeBlade(ctx) {
     },
     refresh(what) {
       if (what === 'library') { paintShelf(); paintPanel(); }
-      if (what === 'achievements' || what === 'settings') paintPanel();
+      if (what === 'achievements') paintPanel();
+      if (what === 'settings') loadBoards(); // another player took over: their best and rank
     },
     prompts() {
       return [{ btn: 'a', label: 'Play' }, { btn: 'x', label: 'Details' }, { btn: 'y', label: 'Leaderboard' }];

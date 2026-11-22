@@ -1104,10 +1104,10 @@ function createGame(api) {
       idleT = 0;
       if (phase === 'idle') {
         const here = idx(cursor.r, cursor.c);
-        if (!selected) { if (at(here)) { selected = { ...cursor }; S.pick(); } }
+        if (!selected) { if (at(here)) { selected = { ...cursor }; dirLock = true; S.pick(); } }
         else if (selected.r === cursor.r && selected.c === cursor.c) { selected = null; S.drop(); }
         else if (Math.abs(selected.r - cursor.r) + Math.abs(selected.c - cursor.c) === 1) startSwap(idx(selected.r, selected.c), here);
-        else { selected = { ...cursor }; S.pick(); }
+        else { selected = { ...cursor }; dirLock = true; S.pick(); }
       }
     }
     if (inp.pressed('b')) { idleT = 0; if (selected) { selected = null; S.drop(); } }

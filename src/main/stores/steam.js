@@ -39,8 +39,8 @@ async function apiOwned(key, steamId) {
 
 async function localPlayed(steamId) {
   const root = await findSteamRoot();
-  if (!root || !steamId) return null;
-  const account = String(BigInt(steamId) - ID64_BASE);
+  if (!root || !steamId || !/^\d{17}$/.test(String(steamId).trim())) return null; // not a SteamID64
+  const account = String(BigInt(String(steamId).trim()) - ID64_BASE);
   try {
     const v = parseVdf(fs.readFileSync(path.join(root, 'userdata', account, 'config', 'localconfig.vdf'), 'utf8'));
     let node = getCI(v, 'UserLocalConfigStore');

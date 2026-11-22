@@ -50,7 +50,9 @@ async function boot() {
   let dashboard = null;
   let saver = null;
   const doSignIn = (slot) => signIn({ allowCancel: true, slot: slot ?? input.lastSlot });
-  const guide = createGuide({ mode, goto: (id) => dashboard && dashboard.goto(id), toast, launch: (id) => launchGame(id), signIn: doSignIn });
+  // In the overlay the launch cover can't live in this window: the dashboard launches instead.
+  const launchVia = mode === 'overlay' ? (id) => window.p360.launcher.launchFromDashboard(id) : (id) => launchGame(id);
+  const guide = createGuide({ mode, goto: (id) => dashboard && dashboard.goto(id), toast, launch: launchVia, signIn: doSignIn });
 
   input.setHandler((action, info) => {
     if (saver && saver.poke()) return; // input only woke the screen
@@ -60,7 +62,11 @@ async function boot() {
   // ---- live updates from main
   window.p360.on('debug:action', (a) => nav.dispatch(a, { slot: 0, device: 'keyboard' }));
   window.p360.on('native:ready', (info) => { store.state.native = info; });
-  window.p360.on('profiles:slots', (d) => { store.state.activeSlot = d.activeSlot; store.set('slots', d.slots); });
+  window.p360.on('profiles:slots', (d) => {
+    store.state.activeSlot = d.activeSlot;
+    if (d.activeSlot !== input.lastSlot) input.resetActivity(); // the next press re-claims the dashboard
+    store.set('slots', d.slots);
+  });
   window.p360.on('toast', (t) => toast(t));
   window.p360.on('library:updated', (lib) => store.set('library', lib));
   window.p360.on('pads', (p) => store.set('pads', p));
@@ -89,15 +95,23 @@ async function boot() {
     style.textContent = '.overlay-prompts{z-index:85;opacity:0;transition:opacity .25s}.guide-open .overlay-prompts{opacity:1}';
     document.head.append(style);
     window.p360.on('guide:open', (d) => guide.open(d && d.slot));
-    window.p360.on('guide:close', () => guide.close({ notify: false }));
+    window.p360.on('guide:close', () => {
+      guide.close({ notify: false });
+      for (let i = 0; i < 8 && nav.depth() > 1; i++) {
+        const t = nav.top();
+        if (t.handle) t.handle('b', { device: 'system' });
+        if (nav.top() === t) nav.pop(t); // a layer that won't close on B still stops taking input
+      }
+    });
   } else {
     const first = !init.signedIn;
     if (first && store.setting('console.bootAnimation')) document.body.classList.add('entering');
     initArcadeArt(); // built-in games draw their own library art
     dashboard = createDashboard(stage, { toast, guide, signIn: doSignIn });
     stage.querySelector('.prompts').style.zIndex = 85;
-    window.p360.on('guide:toggle', (d) => guide.toggle(d && d.slot));
+    window.p360.on('guide:toggle', (d) => { if (saver && saver.poke()) return; guide.toggle(d && d.slot); }); // first press only wakes the screen
     window.p360.on('launch:reveal', () => onReveal());
+    window.p360.on('launch:game', (id) => launchGame(id));
     window.p360.on('profiles:signedOut', (d) => signIn({ allowCancel: false, slot: d && d.slot !== undefined ? d.slot : input.lastSlot }));
 
     if (first) {
@@ -112,6 +126,14 @@ async function boot() {
       else store.set('settings', await window.p360.profiles.signIn(profiles[0].id, input.lastSlot));
     }
     saver = createSaver(stage);
+    let mx = -1, my = -1;
+    document.addEventListener('mousemove', (e) => {
+      if (e.screenX === mx && e.screenY === my) return; // synthetic moves from layout changes
+      mx = e.screenX; my = e.screenY;
+      saver.poke();
+    }, { passive: true });
+    document.addEventListener('click', (e) => { if (saver.poke()) { e.stopPropagation(); e.preventDefault(); } }, true);
+    document.addEventListener('wheel', () => saver.poke(), { passive: true });
   }
 
   store.on('settings', (s) => sound.configure({ enabled: s.audio.uiSounds, volume: s.audio.uiVolume }));

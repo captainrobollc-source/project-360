@@ -134,7 +134,7 @@ class Launcher extends EventEmitter {
     const dirs = (w.dirs || []).join('|');
     const exes = (w.exes || []).join('|');
     if (dirs || exes) {
-      try { for (const p of await native.call('procs.find', dirs, exes)) pids.add(p.pid); } catch { if (!pids.size) return null; }
+      try { for (const p of await native.call('procs.find', dirs, exes)) pids.add(p.pid); } catch { return null; }
     }
     return pids;
   }
@@ -156,7 +156,7 @@ class Launcher extends EventEmitter {
       const ok = wins.filter((w) => !w.iconic && big(w) && !lower.has(w.exe.toLowerCase()) && !SPLASH_TITLE.test(w.title) && !/^(unrealcef|cefsubprocess|crashreport)/i.test(w.exe));
       ok.sort((a, b) => b.w * b.h - a.w * a.h);
       return ok[0] || null;
-    } catch { return null; }
+    } catch { return undefined; }
   }
 
   async launcherWindows() {
@@ -244,7 +244,7 @@ class Launcher extends EventEmitter {
               const again = await this.findGameWindow();
               if (this.current !== c) return;
               if (again) { c.mainPid = again.pid; c.mainGoneAt = 0; } // game restarted itself
-              else return this.finish('exited');
+              else if (again === null) return this.finish('exited'); // (undefined: couldn't look; try again)
             }
           } else c.mainGoneAt = 0;
         }
@@ -281,6 +281,7 @@ class Launcher extends EventEmitter {
         if (Date.now() - goneAt < 1200) return;
         const again = await this.findGameWindow(); // game recreated its window (resolution / mode change)?
         if (this.current !== c) return;
+        if (again === undefined) return; // helper busy: decide on a later tick
         if (again) { c.window = again; c.mainPid = again.pid; goneAt = 0; return; }
         clearInterval(this.watchTimer);
         this.finish('exited');

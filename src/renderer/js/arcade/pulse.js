@@ -237,7 +237,12 @@ function create(api) {
   const GN = 23, GS = (2 * R) / (GN - 1);
   const gx = new Float32Array(GN * GN), gy = new Float32Array(GN * GN);
   function ripple(x, y, amp, v = 650, life = 1) {
-    if (ripples.length >= 14) ripples.shift();
+    if (ripples.length >= 14) {
+      let weakest = 0;
+      for (let i = 1; i < ripples.length; i++) if (ripples[i].amp * ripples[i].life < ripples[weakest].amp * ripples[weakest].life) weakest = i;
+      if (ripples[weakest].amp * ripples[weakest].life > amp) return; // everything on screen matters more
+      ripples.splice(weakest, 1);
+    }
     ripples.push({ x, y, r: 0, v, amp, life: 1, decay: 1 / life });
   }
 
@@ -681,6 +686,14 @@ function create(api) {
     for (const b of bullets) {
       const ox = b.x, oy = b.y;
       b.x += b.vx * dt; b.y += b.vy * dt;
+      const minX = Math.min(ox, b.x), maxX = Math.max(ox, b.x), minY = Math.min(oy, b.y), maxY = Math.max(oy, b.y);
+      for (const e of enemies) {
+        if (e.dead) continue;
+        const rr = e.r + 7;
+        if (e.x < minX - rr || e.x > maxX + rr || e.y < minY - rr || e.y > maxY + rr) continue;
+        if (segDist2(e.x, e.y, ox, oy, b.x, b.y) < rr * rr) { b.dead = true; hit(e, b); break; }
+      }
+      if (b.dead) continue;
       const rx = b.x - CX, ry = b.y - CY;
       if (rx * rx + ry * ry > R * R) {
         b.dead = true;
@@ -688,14 +701,6 @@ function create(api) {
         part(hx, hy, 0, 0, 0.14, 14, CI.accent, 1);
         const back = Math.atan2(-ry, -rx);
         for (let i = 0; i < 2; i++) { const a = back + rand(-1, 1), s = rand(120, 320); part(hx, hy, Math.cos(a) * s, Math.sin(a) * s, 0.2, 1, CI.accent, 0); }
-        continue;
-      }
-      const minX = Math.min(ox, b.x), maxX = Math.max(ox, b.x), minY = Math.min(oy, b.y), maxY = Math.max(oy, b.y);
-      for (const e of enemies) {
-        if (e.dead) continue;
-        const rr = e.r + 7;
-        if (e.x < minX - rr || e.x > maxX + rr || e.y < minY - rr || e.y > maxY + rr) continue;
-        if (segDist2(e.x, e.y, ox, oy, b.x, b.y) < rr * rr) { b.dead = true; hit(e, b); break; }
       }
     }
 
@@ -768,7 +773,8 @@ function create(api) {
       overT -= dt;
       if (overT <= 0) {
         overSent = true;
-        api.gameOver({ score: Math.round(score), stats: { wave: highestWave, noBombWave, kills, maxMultiplier: maxMult } });
+        overT = 0;
+        api.gameOver(finalResult());
       }
     }
   }
@@ -1126,7 +1132,9 @@ function create(api) {
     });
   }
 
-  return { update, draw };
+  const finalResult = () => ({ score: Math.round(score), stats: { wave: highestWave, noBombWave, kills, maxMultiplier: maxMult } });
+  // After the last life the run is decided even before the game-over screen: Restart/Quit keep it.
+  return { update, draw, result: () => (lives <= 0 ? finalResult() : null) };
 }
 
 // ------------------------------------------------------------------ box art
@@ -1438,6 +1446,7 @@ function hero(ctx, w, h) {
 
 export default {
   key: 'pulse',
+  twinStick: true, // arrow keys aim; only WASD / the left stick move
   title: 'Pulse Arena',
   tagline: 'Twin-stick shooter',
   accent: ACCENT,

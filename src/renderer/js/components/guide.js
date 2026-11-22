@@ -8,6 +8,7 @@ import { state, on, gameById, setting, recentGames } from '../store.js';
 import { getRoot, button, confirm, claimLayer, releaseLayer } from './modal.js';
 import { createRing, batteryEl, batteryText } from './ring.js';
 import { coverTile } from './tiles.js';
+import { isRunning as arcadeRunning, quitGame as quitArcade } from '../arcade/engine.js';
 import { lastSlot } from '../input.js';
 import * as music from './music.js';
 
@@ -26,6 +27,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
 
   const go = (blade) => {
     close({ notify: false });
+    if (arcadeRunning()) quitArcade(); // the arcade sits on top of the blades: leave it to go there
     if (mode === 'overlay') window.p360.launcher.showDashboard(blade);
     else goto && goto(blade);
   };
@@ -250,7 +252,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
     const unsubPads = on('pads', () => { ring.update(state.pads, state.activeSlot >= 0 ? state.activeSlot : lastSlot); });
     const unsubSlots = on('slots', () => { paintPlayers(); ring.update(state.pads, state.activeSlot >= 0 ? state.activeSlot : lastSlot); });
     const unsubLauncher = on('launcher', (s) => { if (game && s.phase === 'idle') close({ notify: false }); });
-    cur = { panel, scrim, layer, timer, unsub: () => { unsubPads(); unsubSlots(); unsubLauncher(); (panel._offs || []).forEach((f) => f()); } };
+    cur = { panel, scrim, layer, timer, z, unsub: () => { unsubPads(); unsubSlots(); unsubLauncher(); (panel._offs || []).forEach((f) => f()); } };
     requestAnimationFrame(() => requestAnimationFrame(() => { panel.classList.add('in'); scrim.classList.add('in'); }));
   }
 
@@ -294,7 +296,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
       if (nav.top() === t) break;
     }
     nav.pop(c.layer);
-    releaseLayer();
+    releaseLayer(c.z);
     document.body.classList.remove('guide-open');
     sound.play('back');
     c.panel.classList.remove('in');

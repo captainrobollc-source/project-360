@@ -29,6 +29,10 @@ async function launchExplorer() {
   spawn(path.join(win, 'explorer.exe'), [], { detached: true, stdio: 'ignore' }).unref();
 }
 
+// Set by main: save everything and tell the watchdog this is a clean exit.
+let beforePowerOff = () => {};
+function onPowerOff(fn) { beforePowerOff = fn; }
+
 async function power(action) {
   switch (action) {
     case 'sleep':
@@ -38,9 +42,11 @@ async function power(action) {
       catch (e) { if (/not running/.test(e.message)) execFile('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0'], { windowsHide: true }); }
       return true;
     case 'restart':
+      beforePowerOff();
       execFile('shutdown.exe', ['/r', '/t', '0'], { windowsHide: true });
       return true;
     case 'shutdown':
+      beforePowerOff();
       execFile('shutdown.exe', ['/s', '/t', '0'], { windowsHide: true });
       return true;
     case 'desktop':
@@ -103,4 +109,4 @@ async function setGameBarButton(enabled) {
   return getGameBarButton();
 }
 
-module.exports = { getGameBarButton, setGameBarButton, power, getStartup, setStartup, getShellMode, setShellMode, launchExplorer, isExplorerRunning };
+module.exports = { getGameBarButton, setGameBarButton, power, getStartup, setStartup, getShellMode, setShellMode, launchExplorer, isExplorerRunning, onPowerOff };

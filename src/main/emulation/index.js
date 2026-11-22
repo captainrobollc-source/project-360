@@ -147,8 +147,11 @@ class Emulation extends EventEmitter {
   // disk never leaves a truncated file that later passes an existsSync() check.
   async download(url, dest, id) {
     const ctrl = new AbortController();
-    let idle = setTimeout(() => ctrl.abort(), 60000); // no data for a minute: give up
-    const bump = () => { clearTimeout(idle); idle = setTimeout(() => ctrl.abort(), 60000); };
+    let stalled = false;
+    const stall = () => { stalled = true; ctrl.abort(); };
+    let idle = setTimeout(stall, 60000); // no data for a minute: give up
+    const bump = () => { clearTimeout(idle); idle = setTimeout(stall, 60000); };
+    let failed = null;
     const part = `${dest}.part`;
     try {
       const res = await fetch(url, { headers: { 'User-Agent': 'Project360' }, redirect: 'follow', signal: ctrl.signal });
@@ -156,7 +159,6 @@ class Emulation extends EventEmitter {
       const total = Number(res.headers.get('content-length')) || 0;
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       const out = fs.createWriteStream(part);
-      let failed = null;
       out.on('error', (e) => { failed = e; ctrl.abort(); });
       let received = 0;
       let last = 0;
@@ -177,7 +179,7 @@ class Emulation extends EventEmitter {
       return dest;
     } catch (e) {
       try { fs.unlinkSync(part); } catch { /* not created */ }
-      throw ctrl.signal.aborted && !(e && e.code) ? new Error('Download stalled; check your connection and try again') : e;
+      throw failed || (stalled ? new Error('Download stalled; check your connection and try again') : e);
     } finally {
       clearTimeout(idle);
     }
@@ -185,8 +187,15 @@ class Emulation extends EventEmitter {
 
   async sevenZip() {
     const exe = path.join(this.dirs().tools, '7zr.exe');
-    if (!fs.existsSync(exe)) await this.download(SEVENZR, exe);
-    return exe;
+    if (fs.existsSync(exe)) return exe;
+    return this.once('7zr', async () => { if (!fs.existsSync(exe)) await this.download(SEVENZR, exe); return exe; });
+  }
+
+  // One in-flight promise per task key: concurrent callers wait for the same work.
+  once(key, fn) {
+    if (!this.inflight) this.inflight = new Map();
+    if (!this.inflight.has(key)) this.inflight.set(key, Promise.resolve().then(fn).finally(() => this.inflight.delete(key)));
+    return this.inflight.get(key);
   }
 
   async extract(archive, dest, kind) {
@@ -231,7 +240,9 @@ class Emulation extends EventEmitter {
     }
   }
 
-  async installCore(core) {
+  installCore(core) { return this.once(`core:${core}`, () => this.installCoreNow(core)); }
+
+  async installCoreNow(core) {
     const ra = this.exeOf('retroarch');
     if (!ra) throw new Error('Install RetroArch first');
     const key = `core:${core}`;
@@ -313,24 +324,25 @@ class Emulation extends EventEmitter {
     const extra = (this.settings.get(`emulation.extraFolders.${sys.id}`) || []);
     const exts = new Set(sys.exts);
     const out = [];
+    // Files that belong to another entry: discs listed by an .m3u playlist, tracks listed by a
+    // .cue or .gdi sheet. Only those are hidden (a loose ISO or a single-disc game next to a
+    // playlist still shows up).
+    const listed = new Set();
+    const key = (p) => path.resolve(p).toLowerCase();
+    const readLines = (f) => { try { return fs.readFileSync(f, 'utf8').split(/\r?\n/); } catch { return []; } };
+    const noteMembers = (d, f, ext) => {
+      if (ext === 'm3u' && exts.has('m3u')) {
+        for (const line of readLines(f)) { const t = line.trim(); if (t && !t.startsWith('#')) listed.add(key(path.resolve(d, t))); }
+      } else if (ext === 'cue') {
+        for (const line of readLines(f)) { const m = /^\s*FILE\s+"?([^"]+?)"?\s+\w+\s*$/i.exec(line); if (m) listed.add(key(path.resolve(d, m[1]))); }
+      } else if (ext === 'gdi') {
+        for (const line of readLines(f).slice(1)) { const parts = line.trim().split(/\s+/); if (parts.length >= 5) listed.add(key(path.resolve(d, parts[4].replace(/"/g, '')))); }
+      }
+    };
     const walk = (d, depth) => {
       if (depth > 3) return;
       let entries = [];
       try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-      const names = entries.map((e) => e.name.toLowerCase());
-      const hasCue = names.some((n) => n.endsWith('.cue') || n.endsWith('.m3u') || n.endsWith('.gdi'));
-      // Multi-disc games: an .m3u playlist stands for its discs, so the discs it lists (and, with
-      // a playlist present, loose disc images) aren't separate games.
-      const inPlaylist = new Set();
-      const m3us = entries.filter((e) => e.isFile() && /\.m3u$/i.test(e.name));
-      for (const m of m3us) {
-        try {
-          for (const line of fs.readFileSync(path.join(d, m.name), 'utf8').split(/\r?\n/)) {
-            const t = line.trim();
-            if (t && !t.startsWith('#')) inPlaylist.add(path.basename(t).toLowerCase());
-          }
-        } catch { /* unreadable playlist */ }
-      }
       for (const e of entries) {
         const f = path.join(d, e.name);
         if (e.isDirectory()) {
@@ -347,16 +359,14 @@ class Emulation extends EventEmitter {
           continue;
         }
         const ext = path.extname(e.name).slice(1).toLowerCase();
+        if (ext === 'm3u' || ext === 'cue' || ext === 'gdi') noteMembers(d, f, ext);
         if (!exts.has(ext)) continue;
-        if (hasCue && (ext === 'bin' || ext === 'iso') && ['psx', 'segacd', 'saturn', 'pce', 'dreamcast'].includes(sys.id)) continue; // tracks of a .cue/.m3u
-        if (ext !== 'm3u' && (inPlaylist.has(e.name.toLowerCase()) || (m3us.length && /\((disc|disk|cd) ?\d+\)/i.test(e.name)))) continue;
         out.push({ file: f, title: titleFrom(e.name) });
       }
     };
     for (const d of [dir, ...extra]) walk(d, 0);
-    return out;
+    return out.filter((r) => !listed.has(key(r.file)));
   }
-
   // The emulator/core a system actually uses: a BIOS-free fallback when its BIOS is missing.
   effective(sys) {
     if (sys.fallback && sys.bios && !this.biosStatus(sys).ok) return { ...sys, emulator: sys.fallback.emulator, core: sys.fallback.core, usingFallback: true };

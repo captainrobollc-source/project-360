@@ -16,16 +16,33 @@ const KEYMAP = {
 
 let handler = () => {};
 let nativeSeen = false; // set once the native helper delivers controller input
-let keyCapture = null;
+const keyCaptures = []; // stack: the newest capture wins; releasing one restores the previous
+let heldKeys = new Set(); // keys held when held input was suppressed: their auto-repeat is ignored
 const sources = {};
 let cursorTimer = null;
 export let lastSlot = 0;
 export let lastDevice = 'pad';
 
 export function setHandler(fn) { handler = fn; }
-export function captureKeys(fn) { keyCapture = fn; return () => { if (keyCapture === fn) keyCapture = null; }; }
+export function captureKeys(fn) {
+  keyCaptures.push(fn);
+  return () => { const i = keyCaptures.lastIndexOf(fn); if (i >= 0) keyCaptures.splice(i, 1); };
+}
+
+// Buttons/keys still held right now stop counting until they're released (a menu that pops up
+// mid-game mustn't receive the stick that was steering, or its auto-repeat).
+export function suppressHeld() {
+  for (const src of Object.values(sources)) {
+    for (const t of Object.values(src.timers)) clearTimeout(t);
+    src.timers = {};
+    src.ignore = src.mask;
+  }
+  heldKeys = new Set(downKeys);
+}
+const downKeys = new Set();
 
 let reportedSlot = -1;
+export function resetActivity() { reportedSlot = -1; }
 function fire(action, slot, device) {
   lastDevice = device;
   if (device === 'pad') {
@@ -44,8 +61,9 @@ function scheduleCursorHide() {
 }
 
 function feed(key, mask, slot, { allowGuide }) {
-  const src = sources[key] || (sources[key] = { mask: 0, timers: {} });
-  const pressed = mask & ~src.mask;
+  const src = sources[key] || (sources[key] = { mask: 0, timers: {}, ignore: 0 });
+  src.ignore = (src.ignore || 0) & mask; // released buttons count again
+  const pressed = mask & ~src.mask & ~src.ignore;
   const released = src.mask & ~mask;
   src.mask = mask;
   for (const [name, bit] of Object.entries(BITS)) {
@@ -57,7 +75,7 @@ function feed(key, mask, slot, { allowGuide }) {
     if (REPEAT.has(name)) {
       let delay = 110;
       const tick = () => {
-        if (!(src.mask & m)) return;
+        if (!(src.mask & m) || (src.ignore & m)) return;
         fire(name, slot, 'pad');
         delay = Math.max(55, delay - 8);
         src.timers[name] = setTimeout(tick, delay);
@@ -105,18 +123,27 @@ function gamepadMask(gp) {
 // DirectInput pads (DualSense, Switch Pro…) take a free player slot 1–4 instead of "Player 5+".
 const directSlots = new Map(); // Gamepad API index → slot
 function slotForDirect(index) {
-  if (directSlots.has(index)) return directSlots.get(index);
+  if (directSlots.has(index)) {
+    const s = directSlots.get(index);
+    if (!(state.pads[s] && state.pads[s].connected)) return s;
+    directSlots.delete(index); // an Xbox pad took this player number since: pick another
+  }
   const used = new Set([...(state.pads || []).filter((p) => p.connected).map((p) => p.slot), ...directSlots.values()]);
   for (let s = 0; s < 4; s++) if (!used.has(s)) { directSlots.set(index, s); return s; }
   return 4 + index;
 }
-window.addEventListener('gamepaddisconnected', (e) => directSlots.delete(e.gamepad.index));
+window.addEventListener('gamepaddisconnected', (e) => {
+  directSlots.delete(e.gamepad.index);
+  const src = sources[`gp${e.gamepad.index}`];
+  if (src) { for (const t of Object.values(src.timers)) clearTimeout(t); src.timers = {}; src.mask = 0; }
+});
 
 function pollGamepads() {
   if (!document.hidden && !state.suspended) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const nativeOk = !!state.native || nativeSeen;
     const nativePads = (state.pads || []).filter((p) => p.connected).length;
+    const fed = new Set();
     for (const gp of pads) {
       if (!gp || !gp.connected) continue;
       // The native helper already delivers every XInput pad. Chromium can expose the same pad
@@ -125,8 +152,11 @@ function pollGamepads() {
       const knownDirect = /054c|057e|wireless controller \(standard|dualsense|dualshock|pro controller/i.test(gp.id);
       if (nativeOk && (/xinput|xbox/i.test(gp.id) || (nativePads > 0 && !knownDirect))) continue;
       const sony = /054c|dualsense|dualshock/i.test(gp.id);
+      fed.add(`gp${gp.index}`);
       feed(`gp${gp.index}`, gamepadMask(gp), slotForDirect(gp.index), { allowGuide: !(nativeOk && sony) });
     }
+    // pads that stopped reporting (filtered out, unplugged) let go of held buttons
+    for (const [k, src] of Object.entries(sources)) if (k.startsWith('gp') && !fed.has(k) && src.mask) feed(k, 0, 0, { allowGuide: false });
   }
   requestAnimationFrame(pollGamepads);
 }
@@ -135,7 +165,10 @@ export function init() {
   window.p360.on('pad', ({ s, b }) => { nativeSeen = true; feed(`x${s}`, b, s, { allowGuide: false }); });
 
   window.addEventListener('keydown', (e) => {
-    if (keyCapture && keyCapture(e)) { e.preventDefault(); return; }
+    downKeys.add(e.code);
+    const cap = keyCaptures[keyCaptures.length - 1];
+    if (cap && cap(e)) { e.preventDefault(); return; }
+    if (e.repeat && heldKeys.has(e.code)) { e.preventDefault(); return; }
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     let action = KEYMAP[e.code];
     if (e.code === 'Tab' && e.shiftKey) action = 'lb';
@@ -144,6 +177,9 @@ export function init() {
     if (e.repeat && !REPEAT.has(action)) return;
     fire(action, 0, 'keyboard');
   });
+
+  window.addEventListener('keyup', (e) => { downKeys.delete(e.code); heldKeys.delete(e.code); });
+  window.addEventListener('blur', () => { downKeys.clear(); heldKeys.clear(); });
 
   window.addEventListener('mousemove', () => {
     clearTimeout(cursorTimer);

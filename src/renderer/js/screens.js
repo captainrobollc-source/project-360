@@ -194,7 +194,7 @@ export function runSetup(stage, { toast }) {
         title: 'Pick a look',
         body: 'Choose a theme. You can change it later in System › Themes.',
         opts: THEMES.map((t) => {
-          const btn = button(t.name, { icon: 'image', right: store.setting('theme.name') === t.id ? 'Current' : '', onActivate: next });
+          const btn = button(t.name, { icon: 'image', right: store.setting('theme.name') === t.id ? 'Current' : '', onActivate: async () => { await btn._onFocus(); next(); } });
           btn._onFocus = async () => { if (store.setting('theme.name') !== t.id) { store.set('settings', await window.p360.settings.set('theme.name', t.id)); applyTheme(); } };
           return btn;
         }),
@@ -264,7 +264,7 @@ export function createSaver(stage) {
   function show() {
     if (el || store.state.suspended || !minutes()) return;
     // Watching a video or slideshow: not idle. Check again later.
-    if (document.body.classList.contains('viewer-open') || document.body.classList.contains('arcade-open')) { timer = setTimeout(show, 60000); return; }
+    if (document.body.classList.contains('viewer-open') || document.body.classList.contains('arcade-playing')) { timer = setTimeout(show, 60000); return; }
     const o = orb();
     const clock = h('div.sclock');
     el = h('div.saver', {}, o, clock);

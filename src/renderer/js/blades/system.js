@@ -65,6 +65,7 @@ const gb = (n) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB`
 export function systemBlade(ctx) {
   let wifiCache = null;   // { at, data } from the last Wi-Fi scan
   let wifiScanning = false;
+  let joining = false; // a Wi-Fi connect is in progress
   let netTest = { running: false, res: null }; // last connection test, kept across re-renders
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
@@ -249,6 +250,11 @@ export function systemBlade(ctx) {
           const r = row(n.ssid, detail, h('div.val.wbars', {}, bars(n.bars)), on ? 'connected' : '');
           r.dataset.key = `wifi:${n.ssid}`; // keeps focus on this network when a rescan reorders the list
           r._activate = async () => {
+            if (joining) return;
+            joining = true;
+            try { await activateNetwork(); } finally { joining = false; }
+          };
+          const activateNetwork = async () => {
             if (on || n.saved) {
               const items = on ? [{ label: 'Disconnect', value: 'off', icon: 'close' }] : [{ label: 'Connect', value: 'on', icon: 'wifi' }];
               items.push({ label: 'Forget network', value: 'forget', icon: 'eyeoff', danger: true }, { label: 'Cancel', value: null });

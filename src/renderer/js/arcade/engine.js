@@ -20,7 +20,7 @@ import { h } from '../util.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
 import { claimLayer, releaseLayer, button, getRoot } from '../components/modal.js';
-import { captureKeys } from '../input.js';
+import { captureKeys, suppressHeld } from '../input.js';
 import { state } from '../store.js';
 import { avatar } from '../icons.js';
 
@@ -43,7 +43,7 @@ function dead(x, y, dz) {
   return { x: x * k, y: y * k };
 }
 
-function createInput() {
+function createInput({ twinStick = false } = {}) {
   const keys = new Set();
   const taps = new Set(); // keys pressed since the last frame (a quick tap still counts once)
   let now = {};
@@ -73,7 +73,8 @@ function createInput() {
       }
       for (const [name, codes] of Object.entries(KEYS)) if (codes.some((c) => held.has(c))) now[name] = true;
       // Arrow keys aim (twin-stick on a keyboard) and also count as the d-pad.
-      for (const [dir, code] of Object.entries(AIM_KEYS)) if (held.has(code)) now[dir] = true;
+      // (twin-stick games: arrows only aim, so WASD can move one way while firing another)
+      if (!twinStick) for (const [dir, code] of Object.entries(AIM_KEYS)) if (held.has(code)) now[dir] = true;
       if (now.left) mx = -1; if (now.right) mx = 1; if (now.up) my = -1; if (now.down) my = 1;
       const kax = (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0);
       const kay = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
@@ -141,27 +142,33 @@ function boardEl(rows, { highlightAt } = {}) {
   }));
 }
 
-// ------------------------------------------------------------------ run a game
+/// ------------------------------------------------------------------ run a game
 let current = null;
 
 export function isRunning() { return !!current; }
+// Quit the running game (e.g. the Guide sent you elsewhere). Playtime is still recorded.
+export function quitGame() { if (current) current.quit(); }
 
-export async function runGame(def, { onExit } = {}) {
+export function runGame(def, { onExit } = {}) {
   if (current) return;
   const root = h('div.arcade');
-  root.style.zIndex = String(claimLayer());
+  const z = claimLayer();
+  root.style.zIndex = String(z);
   const canvas = h('canvas', { width: W, height: H });
   const overlay = h('div.arc-overlay');
   root.append(canvas, overlay);
   getRoot().append(root);
   document.body.classList.add('arcade-open');
   const ctx = canvas.getContext('2d');
-  const input = createInput();
+  const input = createInput({ twinStick: !!def.twinStick });
   const focus = new nav.Focus(overlay);
+  // Everything this run records belongs to whoever started it, even if another controller
+  // takes over the dashboard mid-game.
+  const pid = state.settings.activeProfile;
 
   let board = [];
-  try { board = await window.p360.arcade.board(def.key); } catch { /* offline store: empty board */ }
-  const myBest = () => board.filter((r) => r.pid === state.settings.activeProfile).reduce((m, r) => Math.max(m, r.score), 0);
+  let storedBest = 0;
+  const myBest = () => Math.max(storedBest, board.filter((r) => r.pid === pid).reduce((m, r) => Math.max(m, r.score), 0));
 
   let mode = 'title'; // title · play · pause · over
   let game = null;
@@ -170,6 +177,14 @@ export async function runGame(def, { onExit } = {}) {
   let last = 0;
   let ended = false;
   let heroCache = null;
+  let drawnStatic = false; // paused / menus: the frozen frame is drawn once, not 60 times a second
+  let acceptAt = 0;        // menus ignore A for a moment (an A pressed in-game isn't a menu choice)
+
+  const setMode = (m) => {
+    mode = m;
+    drawnStatic = false;
+    document.body.classList.toggle('arcade-playing', m === 'play'); // the screensaver waits only during play
+  };
 
   // Keyboard: track held keys ourselves; while playing swallow them so the dashboard doesn't react.
   const onKeyDown = (e) => { input.keys.add(e.code); input.taps.add(e.code); };
@@ -196,18 +211,33 @@ export async function runGame(def, { onExit } = {}) {
     gameOver: (result) => { if (mode === 'play') finish(result || {}); },
   };
 
+  async function loadBoard() {
+    try {
+      const res = await window.p360.arcade.board(def.key, pid);
+      board = (res && res.rows) || [];
+      storedBest = (res && res.best) || 0;
+    } catch { /* store unavailable: empty board */ }
+    if (!ended && mode === 'title') titleScreen();
+  }
+
   function start() {
+    let g;
+    try { g = def.create(api); } catch (e) {
+      console.error('[arcade] create', e);
+      menu('Couldn’t start', e.message, [{ label: 'Back to dashboard', icon: 'home', fn: exit }]);
+      return;
+    }
     overlay.replaceChildren();
     overlay.classList.remove('in');
     playTime = 0;
     input.taps.clear(); input.poll(); input.poll(); // the A that chose "Play" isn't the game's first press
-    game = def.create(api);
-    mode = 'play';
+    game = g;
+    setMode('play');
     sound.play('select');
     nav.refreshPrompts();
   }
 
-  function menu(title, sub, items, extra) {
+  function menu(title, sub, items, extra, { delay = 250 } = {}) {
     overlay.replaceChildren();
     const panel = h('div.arc-panel', {}, h('div.arc-title', { style: { color: def.accent } }, title), sub ? h('div.arc-sub', {}, sub) : null);
     if (extra) panel.append(extra);
@@ -217,60 +247,70 @@ export async function runGame(def, { onExit } = {}) {
     overlay.append(panel);
     overlay.classList.add('in');
     focus.set(btns.firstChild);
+    // A stick/d-pad still held from gameplay must not slide focus onto "Quit".
+    suppressHeld();
+    acceptAt = performance.now() + delay;
     nav.refreshPrompts();
   }
 
   function titleScreen() {
-    mode = 'title';
+    setMode('title');
     const how = h('div.arc-controls', {}, ...(def.controls || []).map(([k, v]) => h('div', {}, h('b', {}, k), h('span', {}, v))));
     const side = h('div.arc-split', {}, h('div', {}, h('div.arc-k', {}, 'How to play'), how), h('div', {}, h('div.arc-k', {}, 'Leaderboard'), boardEl(board)));
     menu(def.title, def.tagline, [
       { label: 'Play', icon: 'play', fn: start },
       { label: 'Back to dashboard', icon: 'home', fn: exit },
-    ], side);
+    ], side, { delay: 0 });
   }
 
   function pause() {
     if (mode !== 'play') return;
-    mode = 'pause';
+    setMode('pause');
     sound.play('back');
     menu('Paused', null, [
       { label: 'Resume', icon: 'play', fn: resume },
-      { label: 'Restart', icon: 'restart', fn: () => { submit({ score: 0, stats: {} }, true); start(); } },
-      { label: 'Quit to dashboard', icon: 'home', fn: () => { submit({ score: 0, stats: {} }, true); exit(); } },
+      { label: 'Restart', icon: 'restart', fn: () => { submit(decided(), true); start(); } },
+      { label: 'Quit to dashboard', icon: 'home', fn: () => { submit(decided(), true); exit(); } },
     ]);
   }
 
   function resume() {
     overlay.replaceChildren();
     overlay.classList.remove('in');
-    mode = 'play';
+    setMode('play');
     input.taps.clear(); input.poll(); input.poll();
     last = performance.now();
     nav.refreshPrompts();
+  }
+
+  // A game that already knows its final result (game.result()) keeps it if you leave early.
+  function decided() {
+    try { const r = game && game.result && game.result(); if (r) return r; } catch { /* ignore */ }
+    return { score: 0, stats: {} };
   }
 
   async function submit(result, quiet) {
     const seconds = playTime;
     playTime = 0;
     if (seconds < 3 && !result.score) return null;
-    try { return await window.p360.arcade.finish(def.key, { seconds, score: result.score || 0, stats: result.stats || {} }); }
+    try { return await window.p360.arcade.finish(def.key, { seconds, score: result.score || 0, stats: result.stats || {}, pid }); }
     catch (e) { if (!quiet) console.warn('[arcade]', e.message); return null; }
   }
 
   async function finish(result) {
-    mode = 'over';
+    setMode('over');
     const score = Math.round(result.score || 0);
     const res = await submit({ ...result, score });
     if (ended) return;
     if (res && res.board) board = res.board;
+    if (res && res.best) storedBest = res.best;
     const mine = res && res.rank ? board[res.rank - 1] : null;
     const msg = res && res.rank === 1 ? 'New top score!' : res && res.rank ? `#${res.rank} on the leaderboard` : res && res.personalBest ? 'Personal best!' : `Best: ${myBest().toLocaleString()}`;
     sound.play(res && res.rank ? 'achievement' : 'toast');
     menu('Game over', null, [
       { label: 'Play again', icon: 'restart', fn: start },
       { label: 'Back to dashboard', icon: 'home', fn: exit },
-    ], h('div.arc-over', {}, h('div.arc-score', {}, score.toLocaleString()), h('div.arc-msg', {}, msg), boardEl(board, { highlightAt: mine && mine.at })));
+    ], h('div.arc-over', {}, h('div.arc-score', {}, score.toLocaleString()), h('div.arc-msg', {}, msg), boardEl(board, { highlightAt: mine && mine.at })), { delay: 600 });
   }
 
   function exit() {
@@ -282,8 +322,8 @@ export async function runGame(def, { onExit } = {}) {
     window.removeEventListener('blur', blur);
     releaseKeys();
     nav.pop(layer);
-    releaseLayer();
-    document.body.classList.remove('arcade-open');
+    releaseLayer(z);
+    document.body.classList.remove('arcade-open', 'arcade-playing');
     root.classList.add('out');
     setTimeout(() => root.remove(), 300);
     current = null;
@@ -302,11 +342,13 @@ export async function runGame(def, { onExit } = {}) {
         return; // the game reads the controller itself
       }
       if (['up', 'down', 'left', 'right'].includes(action)) focus.handleDir(action);
-      else if (action === 'a') { if (focus.activate()) sound.play('select'); }
+      else if (action === 'a') { if (performance.now() >= acceptAt && focus.activate()) sound.play('select'); }
       else if (action === 'b') { if (mode === 'pause') resume(); else if (mode === 'title') exit(); }
       else if (action === 'start' && mode === 'pause') resume();
     },
   };
+  // Claim the arcade before anything async, so a second press can't start another copy.
+  current = { def, exit, quit: () => { if (mode === 'play' || mode === 'pause') submit(decided(), true); exit(); } };
   nav.push(layer);
 
   function frame(t) {
@@ -318,11 +360,17 @@ export async function runGame(def, { onExit } = {}) {
     if (mode === 'play' && game) {
       input.poll();
       playTime += dt;
-      try { game.update(dt); } catch (e) { console.error('[arcade]', e); finish({ score: 0 }); }
+      try { game.update(dt); } catch (e) { console.error('[arcade]', e); if (mode === 'play') finish({ score: 0 }); }
     }
+    if (mode !== 'play' && drawnStatic) return;
+    drawnStatic = mode !== 'play';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
     if (game) {
+      ctx.save();
       try { game.draw(ctx); } catch (e) { console.error('[arcade]', e); }
+      ctx.restore();
     } else if (def.art && def.art.hero) {
       if (!heroCache) {
         heroCache = document.createElement('canvas');
@@ -334,6 +382,6 @@ export async function runGame(def, { onExit } = {}) {
   }
   requestAnimationFrame((t) => { last = t; frame(t); });
   requestAnimationFrame(() => root.classList.add('in'));
-  current = { def, exit };
   titleScreen();
+  loadBoard();
 }

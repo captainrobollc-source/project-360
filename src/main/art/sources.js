@@ -344,7 +344,8 @@ function libretroMatch(names, romName, title) {
     const s = U.similarity(stripTags(n), want);
     if (s > bestScore || (s === bestScore && best && regionRank(n) < regionRank(best))) { best = n; bestScore = s; }
   }
-  if (bestScore >= 0.85) return best;
+  const nums = (s) => (U.normTitle(stripTags(s)).match(/\b(\d+|i{1,3}|iv|v|vi{0,3}|ix|x)\b/g) || []).join(' ');
+  if (bestScore >= 0.85 && nums(best) === nums(want)) return best;
   // "Zelda - A Link to the Past" vs "Legend of Zelda, The - A Link to the Past": all words present,
   // at most two extra words and no sequel number.
   let contained = null; let fewest = 99;

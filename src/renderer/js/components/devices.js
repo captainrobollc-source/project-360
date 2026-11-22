@@ -20,8 +20,15 @@ export function listenForPairing() {
     if (ev.type !== 'bt.pairing') return;
     const name = ev.name || 'the device';
     if (ev.kind === 'confirmPin') {
-      const ok = await confirm({ title: `Pair with ${name}?`, text: `Check that ${name} shows this PIN:\n\n${ev.pin}`, buttons: [{ label: 'It matches', value: true }, { label: 'Cancel', value: false }] });
-      window.p360.bt.reply(ev.id, !!ok, '').catch(() => {});
+      let answered = false;
+      const answer = (ok) => { if (answered) return; answered = true; window.p360.bt.reply(ev.id, ok, '').catch(() => {}); };
+      pinPrompt = modal({
+        build(panel, close) {
+          panel.append(h('h3', {}, `Pair with ${name}?`), h('p', {}, `Check that ${name} shows this PIN:`), h('div.bigpin', {}, ev.pin),
+            h('div.btns', {}, button('It matches', { onActivate: () => { answer(true); close(true); } }), button('Cancel', { onActivate: () => { answer(false); close(false); } })));
+        },
+        onClose: () => { answer(false); pinPrompt = null; },
+      });
     } else if (ev.kind === 'providePin') {
       const pin = await osk({ title: `PIN for ${name}`, placeholder: 'Often 0000 or 1234', maxLength: 16 });
       window.p360.bt.reply(ev.id, pin !== null && pin !== '', pin || '').catch(() => {});
@@ -48,12 +55,13 @@ export function addDevice({ toast }) {
     let unsub = () => {};
     const items = new Map();
     let pairing = false;
+    let closed = false; // the dialog was closed (B) while something was still in flight
 
     modal({
       panelClass: 'dialog btadd',
       sound: 'guide',
       prompts: () => [{ btn: 'a', label: 'Pair' }, { btn: 'b', label: 'Close' }],
-      onClose: () => { unsub(); window.p360.bt.scan(false).catch(() => {}); resolve(paired); },
+      onClose: () => { closed = true; unsub(); window.p360.bt.scan(false).catch(() => {}); resolve(paired); },
       build(panel, close, focus) {
         const status = h('div.btstatus', {}, h('div.spin', {}, orb()), h('span', {}, 'Searching for devices…'));
         const list = h('div.btlist', { 'data-scroll': '' });
@@ -111,7 +119,7 @@ export function addDevice({ toast }) {
             const why = err ? err.message : ({ AuthenticationTimeout: 'it timed out', AuthenticationFailure: 'the PIN was rejected', RejectedByHandler: 'it was cancelled', ConnectionRejected: 'the device refused', NotReadyToPair: 'it isn’t in pairing mode', RequiredHandlerNotRegistered: 'it needs a pairing method we can’t show' }[res && res.status] || (res && res.status) || 'unknown error');
             el.children[2].textContent = 'Failed';
             toast({ title: `Couldn’t pair ${dev.name}`, text: why, sound: 'error' });
-            start();
+            if (!closed) start();
           }
         };
 

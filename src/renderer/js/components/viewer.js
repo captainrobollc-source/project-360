@@ -9,7 +9,8 @@ import { track } from '../store.js';
 
 function shell({ prompts, handle, build }) {
   const el = h('div.viewer');
-  el.style.zIndex = String(claimLayer()); // above the Guide or a dialog it was opened from
+  const z = claimLayer(); // above the Guide or a dialog it was opened from
+  el.style.zIndex = String(z);
   document.body.classList.add('viewer-open');
   getRoot().append(el);
   let idleT;
@@ -20,7 +21,7 @@ function shell({ prompts, handle, build }) {
   };
   function close() {
     nav.pop(layer);
-    releaseLayer();
+    releaseLayer(z);
     if (document.querySelectorAll('.viewer').length <= 1) document.body.classList.remove('viewer-open'); // this one is still fading out
     sound.play('back');
     el.classList.remove('in');

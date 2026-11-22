@@ -263,7 +263,11 @@ namespace P360Radio
                     lock (scanLock) { if (watcher != s) return; found.Remove(u.Id); }
                     Program.Emit("{\"ev\":\"bt.gone\",\"id\":" + Json.Str(u.Id) + "}");
                 };
-                w.Stopped += (s, o) => Program.Emit("{\"ev\":\"bt.scanDone\"}");
+                w.Stopped += (s, o) =>
+                {
+                    lock (scanLock) { if (watcher != null && watcher != s) return; }
+                    Program.Emit("{\"ev\":\"bt.scanDone\"}");
+                };
                 watcher = w;
                 w.Start();
                 stopTimer = new Timer(_ => StopScan(), null, 40000, Timeout.Infinite);

@@ -1083,7 +1083,10 @@ export default {
 
     function multiBall() {
       if (S.balls.some((b) => b.stuck)) launch();
-      const src = S.balls.find((b) => !b.dead);
+      const live = S.balls.filter((b) => !b.dead);
+      const catchable = live.filter((b) => b.y < PY - BALL_R);
+      const rising = catchable.filter((b) => b.vy < 0);
+      const src = (rising.length ? rising : catchable).sort((a, b) => a.y - b.y)[0] || live[0];
       if (!src) return;
       const sp = Math.hypot(src.vx, src.vy) || speedNow();
       const a = Math.atan2(src.vy, src.vx);
@@ -1263,7 +1266,7 @@ export default {
         b.trail.push(b.x, b.y);
         if (b.trail.length > 24) b.trail.splice(0, 2);
         b.stale += dt;
-        if (b.stale > 15 && b.y < 640) {
+        if (b.stale > 15 && b.y < PY - 150) {
           // no glass touched for a while (a loop off steel, or a vertical ping-pong): nudge it, away from the paddle
           const a = Math.atan2(b.vy, b.vx) + (Math.random() < 0.5 ? -1 : 1) * rnd(0.2, 0.4);
           b.vx = Math.cos(a) * speed; b.vy = Math.sin(a) * speed;
@@ -1313,7 +1316,7 @@ export default {
       }
 
       S.stats.maxBalls = Math.max(S.stats.maxBalls, S.balls.length);
-      if (S.breakable <= 0 && !S.blasts.length) { levelClear(); return; }
+      if (S.breakable <= 0) { if (!S.blasts.length) levelClear(); return; }
       if (!S.balls.length) loseLife();
     }
 

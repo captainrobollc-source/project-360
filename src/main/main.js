@@ -91,7 +91,7 @@ const art = new ArtManager(path.join(USER, 'art'), library, settings, findSteamR
 const emulation = new Emulation({ userDir: USER, settings });
 library.registerScanner('emulation', emulation);
 const achievements = new Achievements(() => library.profileData(), () => library.user.save());
-const arcade = require('./arcade').create({ settings, library, achievements, profiles: () => settings.get('profiles') || [] });
+const arcade = require('./arcade').create({ settings, library, achievements, profiles: () => settings.get('profiles') || [], withProfile: (id, fn) => withProfile(id, fn) });
 library.registerScanner('arcade', arcade.scanner);
 // ------------------------------------------------------------------ per-controller profiles
 // Each controller slot can have its own signed-in profile. The controller in use decides whose
@@ -303,7 +303,9 @@ function onGuide(slot = 0) {
 // Controller → mouse/keyboard while a desktop/web app is in front (and the Guide is closed).
 function updateEmu() {
   const st = launcher.state();
-  const want = !!signInWin || !!(st.phase === 'running' && st.revealed && st.controllerMouse && !overlayGuideOpen && !mainVisible());
+  const want = !!signInWin
+    || !!(st.phase === 'running' && st.revealed && st.controllerMouse && !overlayGuideOpen && !mainVisible())
+    || !!(st.attention && !st.revealed && st.phase !== 'idle' && !overlayGuideOpen && !mainVisible());
   if (want === emuOn) return;
   emuOn = want;
   native.call(want ? 'emu.on' : 'emu.off').catch(() => {});
@@ -312,7 +314,7 @@ function updateEmu() {
 // ------------------------------------------------------------------ controllers
 const pads = [0, 1, 2, 3].map((s) => ({ slot: s, connected: false, battery: null }));
 const masks = [0, 0, 0, 0];
-let chordTimer = null;
+const chordTimers = [];
 
 function inputTarget() {
   if (signInWin) return null;
@@ -333,8 +335,8 @@ native.on('in', ({ s, b }) => {
   if (pressed & (1 << 10)) onGuide(s);
   if (settings.get('console.backStartGuide')) {
     const both = (b & 0x30) === 0x30;
-    if (both && (prev & 0x30) !== 0x30) chordTimer = setTimeout(() => { if ((masks[s] & 0x30) === 0x30) onGuide(s); }, 700);
-    if (!both) clearTimeout(chordTimer);
+    if (both && (prev & 0x30) !== 0x30) chordTimers[s] = setTimeout(() => { if ((masks[s] & 0x30) === 0x30) onGuide(s); }, 700);
+    if (!both) clearTimeout(chordTimers[s]);
   }
   if (signInWin) return; // controller mouse is driving the sign-in window
   const target = inputTarget();
@@ -374,7 +376,17 @@ native.on('bat', ({ s, type, lvl }) => {
   }
 });
 
-native.on('exit', () => { taskbarHidden = false; emuOn = false; });
+native.on('exit', () => {
+  taskbarHidden = false;
+  emuOn = false;
+  const target = inputTarget();
+  for (let s = 0; s < 4; s++) {
+    if (masks[s]) { masks[s] = 0; if (target) send(target, 'pad', { s, b: 0 }); }
+    pads[s].connected = false;
+    pads[s].battery = null;
+  }
+  broadcast('pads', pads);
+});
 native.on('ready', (info) => {
   native.call('pad.battery').catch(() => {});
   applyTaskbar();
@@ -583,16 +595,24 @@ handle('app:init', (e, mode) => initPayload(mode));
 handle('library:get', () => library.view());
 handle('library:rescan', async () => maybeRescan(true));
 // ---- Built-in arcade (the games run inside the dashboard renderer)
-handle('arcade:board', (e, key) => arcade.board(key));
-handle('arcade:finish', (e, key, result) => {
-  const res = arcade.finish(key, result, settings.get('activeProfile'));
-  broadcast('library:updated', library.view ? library.view() : undefined);
+handle('arcade:board', (e, key, pid) => arcade.board(key, pid || settings.get('activeProfile')));
+handle('arcade:finish', (e, key, result = {}) => {
+  // Credit the player who started the run (the engine sends their id).
+  const pid = result.pid && (settings.get('profiles') || []).some((p) => p.id === result.pid) ? result.pid : settings.get('activeProfile');
+  const res = arcade.finish(key, result, pid);
+  broadcast('library:updated', library.view());
+  broadcast('arcade:updated', { key });
+  setImmediate(() => broadcast('achievements:updated', { list: achievements.list(), totals: achievements.totals() }));
   return res;
 });
+
+// Scripted test runs never start real games or apps on this PC (P360_ALLOW_LAUNCH=1 opts in).
+const NO_LAUNCH = !!process.env.P360_SCRIPT && !process.env.P360_ALLOW_LAUNCH;
 
 handle('game:launch', async (e, id) => {
   const g = library.game(id);
   if (!g) throw new Error('Game not found');
+  if (NO_LAUNCH && g.source !== 'arcade') throw new Error('Launching is disabled in scripted test runs');
   if (g.source === 'arcade') throw new Error('ARCADE'); // the renderer runs these itself
   if (g.systemId) {
     // Emulated game: make sure its emulator / core is there (cores install on demand).
@@ -614,6 +634,7 @@ handle('game:launch', async (e, id) => {
   return st;
 });
 handle('media:launch', async (e, id) => {
+  if (NO_LAUNCH) throw new Error('Launching is disabled in scripted test runs');
   const m = media.list(settings, USER).find((x) => x.id === id);
   if (!m) throw new Error('App not found');
   achievements.track('media');
@@ -828,6 +849,11 @@ handle('launcher:showDashboard', async (e, blade) => {
   await restoreDashboard();
   if (blade) send(main, 'nav:goto', blade);
 });
+handle('launcher:launchFromDashboard', async (e, id) => {
+  if (overlayGuideOpen) closeOverlayGuide();
+  await restoreDashboard();
+  send(main, 'launch:game', id);
+});
 
 handle('overlay:guideClosed', () => {
   overlayGuideOpen = false;
@@ -874,11 +900,15 @@ handle('dialog:addFolder', async (e, kind = 'games') => {
 
 handle('app:quit', () => { app.exit(0); });
 const relaunchArgs = () => ({ args: process.argv.slice(1).filter((a) => a !== '--recovered') });
-handle('app:relaunch', () => {
-  if (AS_SHELL) return app.exit(65);
+function relaunchApp() {
+  if (updater.status && updater.status.state === 'ready') { try { updater.install(); return; } catch { /* fall back */ } }
+  if (AS_SHELL) { app.exit(65); return; }
+  // Otherwise a downloaded-but-not-ready installer could run on quit and kill the new instance.
+  try { if (updater.au) updater.au.autoInstallOnAppQuit = false; } catch { /* ignore */ }
   app.relaunch(relaunchArgs());
   app.exit(0);
-});
+}
+handle('app:relaunch', () => relaunchApp());
 
 // ------------------------------------------------------------------ store accounts + downloads
 const stores = new StoreManager({
@@ -997,7 +1027,7 @@ handle('backups:list', () => backups.list());
 handle('backups:create', () => backups.create('manual'));
 // Restored files must not be overwritten by a pending save in the moment before the restart.
 function freezeStores() { for (const st of [settings, library.lib, library.user, emulation.state, stores.state]) { try { st.freeze(); } catch { /* ignore */ } } }
-handle('backups:restore', (e, id) => { backups.restore(id); freezeStores(); setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(relaunchArgs()); app.exit(0); } }, 600); return true; });
+handle('backups:restore', (e, id) => { backups.restore(id); freezeStores(); setTimeout(relaunchApp, 600); return true; });
 handle('backups:export', async () => {
   main.setAlwaysOnTop(false);
   const r = await dialog.showSaveDialog(main, { title: 'Export a backup', defaultPath: path.join(app.getPath('documents'), `Project 360 backup ${new Date().toISOString().slice(0, 10)}.p360backup`), filters: [{ name: 'Project 360 backup', extensions: ['p360backup'] }] });
@@ -1012,7 +1042,7 @@ handle('backups:import', async () => {
   if (r.canceled || !r.filePaths[0]) return null;
   backups.importFrom(r.filePaths[0]);
   freezeStores();
-  setTimeout(() => { if (AS_SHELL) app.exit(65); else { app.relaunch(relaunchArgs()); app.exit(0); } }, 600);
+  setTimeout(relaunchApp, 600);
   return r.filePaths[0];
 });
 handle('update:status', () => ({ ...updater.status, configured: updater.configured(), packaged: app.isPackaged, repo: updater.repo() }));
@@ -1139,6 +1169,10 @@ app.whenReady().then(() => {
   updater.on('ready', (v) => toast({ kind: 'orb', icon: 'restart', title: `Update ${v} ready`, text: 'Installs when you restart · System › Updates', sound: 'toast', duration: 6000 }));
   updater.on('installing', () => { try { backups.create('update'); } catch { /* ignore */ } });
   updater.init();
+  // Shutdown/restart from the Guide: save and mark a clean exit (will-quit may never come).
+  system.onPowerOff(() => { try { settings.flush(); library.flush(); } catch { /* ignore */ } reliability.markExit(); });
+  // Waking from sleep: beat at once so the watchdog sees a live dashboard.
+  try { require('electron').powerMonitor.on('resume', () => reliability.beat()); } catch { /* ignore */ }
   // Warm up the Bluetooth/Wi-Fi helper so System › Bluetooth opens instantly.
   setTimeout(() => radio.prewarm(), 8000);
   registerShortcuts();

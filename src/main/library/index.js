@@ -67,7 +67,10 @@ class Library extends EventEmitter {
   }
 
   async scan() {
-    if (this.scanning) return this.scanning;
+    if (this.scanning) {
+      if (!this.rescanAfter) this.rescanAfter = this.scanning.then(() => { this.rescanAfter = null; return this.scan(); });
+      return this.rescanAfter;
+    }
     this.scanning = (async () => {
       const cfg = this.settings.get('library');
       const old = this.games();

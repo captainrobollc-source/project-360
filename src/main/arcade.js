@@ -27,47 +27,64 @@ const entryFor = (c) => ({
   meta: { description: c.description, genres: [c.genre], developer: 'Project 360', publisher: 'Project 360', year: c.year, players: c.players },
 });
 
-function create({ settings, library, achievements, profiles }) {
+function create({ settings, library, achievements, profiles, withProfile }) {
   const boards = () => {
-    const a = settings.get('arcade') || {};
-    if (!a.scores) a.scores = {};
-    if (!settings.get('arcade')) settings.data.arcade = a;
-    return a.scores;
+    if (!settings.data.arcade) settings.data.arcade = {};
+    if (!settings.data.arcade.scores) settings.data.arcade.scores = {};
+    return settings.data.arcade.scores;
   };
   const view = (key) => (boards()[key] || []).map((r, i) => {
     const p = profiles().find((x) => x.id === r.pid);
     return { rank: i + 1, score: r.score, at: r.at, pid: r.pid, gamertag: p ? p.gamertag : 'Former player', avatar: p ? p.avatar : 0 };
+  });
+  // Per-profile arcade stats (best score per game, games played) live with that profile's data.
+  const statsOf = (pid) => withProfile(pid, () => {
+    const d = library.profileData();
+    d.stats = d.stats || {};
+    d.stats.arcade = d.stats.arcade || { best: {}, played: [] };
+    return d.stats.arcade;
   });
 
   return {
     CATALOG,
     scanner: { scan: async () => ({ ok: true, games: CATALOG.map(entryFor) }) },
 
-    board(key) { return view(key); },
+    // The shared leaderboard plus this player's own best (which may be off the top 10).
+    board(key, pid) {
+      const board = view(key);
+      const own = pid ? statsOf(pid).best[key] || 0 : 0;
+      const onBoard = board.filter((r) => r.pid === pid).reduce((m, r) => Math.max(m, r.score), 0);
+      return { rows: board, best: Math.max(own, onBoard) };
+    },
 
-    // A finished run: playtime for the active profile, leaderboard, achievements.
+    // A finished run, credited to the player who started it (pid), not whoever is active now.
     finish(key, { seconds = 0, score = 0, stats = {} } = {}, pid) {
-      const id = `arcade:${key}`;
       if (!CATALOG.some((c) => c.key === key)) throw new Error('Unknown arcade game');
-      if (seconds > 0) library.recordSession(id, Math.round(seconds));
-      const list = boards()[key] || (boards()[key] = []);
-      const prevBest = list.filter((r) => r.pid === pid).reduce((m, r) => Math.max(m, r.score), 0);
-      let rank = 0;
-      if (score > 0) {
-        list.push({ pid, score: Math.round(score), at: Date.now() });
-        list.sort((a, b) => b.score - a.score || a.at - b.at);
-        list.length = Math.min(list.length, BOARD_SIZE);
-        const i = list.findIndex((r) => r.pid === pid && r.score === Math.round(score));
-        rank = i >= 0 ? i + 1 : 0;
-        settings.save();
-      }
-      const played = new Set([...(settings.get('arcade.played') || []), key]);
-      settings.data.arcade.played = [...played];
-      settings.save();
-      achievements.track('arcade', { game: key, score, stats, played: [...played], top: rank === 1, total: CATALOG.length });
-      return { rank, personalBest: score > prevBest, prevBest, board: view(key) };
+      if (!profiles().some((p) => p.id === pid)) throw new Error('Unknown profile');
+      const id = `arcade:${key}`;
+      score = Math.max(0, Math.round(Number(score) || 0));
+      return withProfile(pid, () => {
+        if (seconds > 0) library.recordSession(id, Math.round(seconds));
+        const mine = statsOf(pid);
+        const prevBest = mine.best[key] || 0;
+        if (score > prevBest) mine.best[key] = score;
+        mine.played = [...new Set([...(mine.played || []), key])];
+        library.user.save();
+
+        const list = boards()[key] || (boards()[key] = []);
+        let rank = 0;
+        if (score > 0) {
+          const entry = { pid, score, at: Date.now() };
+          list.push(entry);
+          list.sort((a, b) => b.score - a.score || a.at - b.at);
+          list.length = Math.min(list.length, BOARD_SIZE);
+          rank = list.indexOf(entry) + 1; // 0 when it didn't make the board
+          settings.save();
+        }
+        achievements.track('arcade', { game: key, score, stats, played: mine.played, top: rank === 1, total: CATALOG.length });
+        return { rank, personalBest: score > prevBest && score > 0, prevBest, best: Math.max(prevBest, score), board: view(key) };
+      });
     },
   };
 }
-
 module.exports = { create, CATALOG };

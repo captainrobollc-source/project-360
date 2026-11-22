@@ -7,6 +7,7 @@ import * as sound from '../sound.js';
 import { gameById, state, setting } from '../store.js';
 import { getRoot } from './modal.js';
 import { isArcade, playArcade } from '../arcade/index.js';
+import { isRunning as arcadeRunning, quitGame as quitArcade } from '../arcade/engine.js';
 import * as music from './music.js';
 
 let splash = null;
@@ -47,6 +48,7 @@ function showSplash(item) {
 
 export function hideSplash(immediate = false) {
   if (!splash) return;
+  if (musicPaused && state.launcher.phase === 'idle') { musicPaused = false; music.resume(); }
   const s = splash;
   splash = null;
   nav.pop(s.layer);
@@ -57,11 +59,12 @@ export function hideSplash(immediate = false) {
 export async function launchGame(id) {
   const g = gameById(id);
   if (!g) return;
-  if (isArcade(g)) { sound.play('launch'); playArcade(g.id); return; } // runs inside the dashboard
   if (state.launcher.phase !== 'idle') {
     toastFn({ title: `${state.launcher.title} is running`, text: 'Close it from the Guide first', sound: 'error' });
     return;
   }
+  if (isArcade(g)) { sound.play('launch'); playArcade(g.id); return; } // runs inside the dashboard
+  if (arcadeRunning()) quitArcade(); // starting a real game from the Guide: leave the arcade first
   if (inFlight) return;
   inFlight = true;
   sound.play('launch');

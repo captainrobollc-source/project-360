@@ -12,20 +12,20 @@ export function getRoot() { return root; }
 // Every modal stacks above whatever opened it: the dashboard, the Guide (80), the photo viewer
 // (120) or the setup wizard (250). Below the screensaver (400).
 const Z_BASE = 260;
-let openCount = 0;
-let zTop = Z_BASE;
+const claimed = []; // z-index of every open layer
 
 // Overlay layers (modals, the Guide, the viewer) take the next z-index up, so whatever opened
 // last is on top. While any is open the prompt bar rides above them all.
 export function claimLayer() {
-  if (openCount++ === 0) zTop = Z_BASE;
-  zTop += 2;
+  const z = (claimed.length ? Math.max(...claimed) : Z_BASE) + 2; // just above the highest open layer
+  claimed.push(z);
   document.body.classList.add('has-layer');
-  return zTop;
+  return z;
 }
-export function releaseLayer() {
-  openCount = Math.max(0, openCount - 1);
-  if (!openCount) document.body.classList.remove('has-layer');
+export function releaseLayer(z) {
+  const i = z === undefined ? claimed.length - 1 : claimed.lastIndexOf(z);
+  if (i >= 0) claimed.splice(i, 1);
+  if (!claimed.length) document.body.classList.remove('has-layer');
 }
 
 export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, scrim = true, sound: openSound = null }) {
@@ -53,7 +53,7 @@ export function modal({ panelClass = 'dialog', build, handle, prompts, onClose, 
   function close(value) {
     if (closed) return;
     closed = true;
-    releaseLayer();
+    releaseLayer(z);
     nav.pop(layer);
     panel.classList.remove('in');
     if (scrimEl) scrimEl.classList.remove('in');
@@ -197,6 +197,7 @@ export function osk({ title = 'Enter text', value = '', placeholder = '', maxLen
     });
 
     releaseKeys = captureKeys((e) => {
+      if (nav.top() !== m.layer) return false; // something (the Guide) is on top of it
       if (e.key === 'Enter') { m.close(text); return true; }
       if (e.key === 'Escape') { m.close(null); return true; }
       if (e.key === 'Backspace') { backspace(); return true; }
