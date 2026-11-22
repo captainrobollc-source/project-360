@@ -28,17 +28,21 @@ export function configure({ enabled: en, volume: vol }) {
   if (vol !== undefined) { volume = vol; if (master) master.gain.value = vol; }
 }
 
+let packToken = 0;
 export async function loadPack(pack) {
+  const my = ++packToken;
   buffers = {};
   packName = pack ? pack.name : 'default';
   if (!pack || !pack.files) return;
   ensure();
+  const next = {};
   await Promise.all(Object.entries(pack.files).map(async ([name, url]) => {
     try {
       const res = await fetch(url);
-      buffers[name] = await ctx.decodeAudioData(await res.arrayBuffer());
+      next[name] = await ctx.decodeAudioData(await res.arrayBuffer());
     } catch (e) { console.warn('sound pack', name, e); }
   }));
+  if (my === packToken) buffers = next; // another pack was picked meanwhile: drop these
 }
 
 export function currentPack() { return packName; }

@@ -186,12 +186,14 @@ async function testDns() {
   const t0 = process.hrtime.bigint();
   // The OS resolver is what games/launchers use; c-ares direct queries are only a fallback
   // (they fail on PCs whose configured DNS server is a local proxy such as 127.0.0.1).
+  // Both attempts fit inside the per-test limit (NET_TIMEOUT_MS + 1 s): a hung OS lookup still
+  // leaves time for the direct query.
   try {
-    const r = await withTimeout(dns.promises.lookup(host, { family: 4 }), NET_TIMEOUT_MS, 'DNS');
+    const r = await withTimeout(dns.promises.lookup(host, { family: 4 }), Math.round(NET_TIMEOUT_MS * 0.55), 'DNS');
     return { ok: true, ms: elapsed(t0), detail: `${host} → ${r.address}` };
   } catch (err) {
     try {
-      const addrs = await withTimeout(dns.promises.resolve4(host), NET_TIMEOUT_MS, 'DNS');
+      const addrs = await withTimeout(dns.promises.resolve4(host), Math.round(NET_TIMEOUT_MS * 0.55), 'DNS');
       return { ok: true, ms: elapsed(t0), detail: `${host} → ${addrs[0]} (direct DNS)` };
     } catch {
       return { ok: false, ms: elapsed(t0), detail: `Couldn't resolve ${host}: ${err.code || err.message}` };
@@ -199,14 +201,15 @@ async function testDns() {
   }
 }
 
-async function testHttp(url, name) {
+async function testHttp(url, name, { expect } = {}) {
   const t0 = process.hrtime.bigint();
   try {
     const res = await fetch(url, { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(NET_TIMEOUT_MS), headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Project360' } });
     const ms = elapsed(t0);
     try { if (res.body) await res.body.cancel(); } catch { /* ignore */ }
-    const ok = res.status < 500;
-    return { ok, ms, detail: ok ? `${name} reachable (HTTP ${res.status})` : `${name} returned HTTP ${res.status}` };
+    const ok = expect ? res.status === expect : res.status < 500;
+    const portal = expect && res.status !== expect && res.status < 500;
+    return { ok, ms, detail: ok ? `${name} reachable (HTTP ${res.status})` : portal ? `${name}: a sign-in page is in the way (HTTP ${res.status}). Open a browser to sign in to this network.` : `${name} returned HTTP ${res.status}` };
   } catch (err) {
     const ms = elapsed(t0);
     const cause = err && err.cause;
@@ -219,7 +222,7 @@ async function testHttp(url, name) {
 const TESTS = [
   { id: 'adapter', label: 'Network adapter', fn: testAdapter },
   { id: 'dns', label: 'DNS', fn: testDns },
-  { id: 'internet', label: 'Internet', fn: () => testHttp('https://www.gstatic.com/generate_204', 'Internet') },
+  { id: 'internet', label: 'Internet', fn: () => testHttp('https://www.gstatic.com/generate_204', 'Internet', { expect: 204 }) },
   { id: 'steam', label: 'Steam', fn: () => testHttp('https://store.steampowered.com/', 'Steam') },
   // store.epicgames.com answers scripted clients with a Cloudflare 403, so probe the store backend instead.
   { id: 'epic', label: 'Epic Games', fn: () => testHttp('https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US&country=US', 'Epic Games Store') },

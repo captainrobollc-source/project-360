@@ -66,7 +66,9 @@ export function socialBlade(ctx) {
       pane.append(h('h2', {}, 'friends'));
       if (!friends) { loadFriends(); pane.append(h('div.empty-note', {}, 'Loading friends…'), orb('fast')); return; }
       if (friends.needsKey) {
-        pane.append(h('div.lead', { html: 'See which of your Steam friends are online and what they’re playing. Get a free <b>Steam Web API key</b> at steamcommunity.com/dev/apikey and enter it below.' + (friends.steamId ? `<br>Detected Steam account: ${friends.steamId}` : '') }));
+        // steamId comes from settings (typed or imported): text nodes only, never HTML.
+        pane.append(h('div.lead', {}, 'See which of your Steam friends are online and what they’re playing. Get a free ', h('b', {}, 'Steam Web API key'), ' at steamcommunity.com/dev/apikey and enter it below.',
+          friends.steamId ? h('br') : null, friends.steamId ? `Detected Steam account: ${friends.steamId}` : null));
         pane.append(h('div', { style: { display: 'flex', gap: '14px' } },
           button('Enter Steam Web API key', { icon: 'user', onActivate: async () => {
             const v = await osk({ title: 'Steam Web API key', value: setting('social.steamApiKey'), maxLength: 64 });

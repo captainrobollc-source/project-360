@@ -23,6 +23,15 @@ export function marketBlade(ctx) {
     loading = window.p360.market.get(force).then((d) => { data = d; }).catch(() => { data = { sections: [], offline: true }; }).finally(() => { loading = null; });
     return loading;
   };
+  // After deals load (or fail): the list changes; if the "Loading deals…" page is showing, move
+  // to the first deals page (or show the failure) instead of leaving a spinner and a removed item.
+  const afterMarket = () => {
+    split.renderList();
+    if (split.current() !== 'loading') return;
+    const first = data && data.sections && data.sections[0];
+    if (first) split.select(first.id, { keepFocus: split.inPane() });
+    else split.rerender();
+  };
   const loadAccounts = async () => {
     try { accounts = await window.p360.stores.list(); } catch { accounts = []; }
     split.renderList();
@@ -294,7 +303,7 @@ export function marketBlade(ctx) {
       }
       if (id === 'refresh') {
         pane.append(h('h2', {}, 'refresh'), h('div.lead', {}, 'Get the latest deals and free games.'));
-        pane.append(button('Refresh now', { icon: 'restart', onActivate: async () => { await loadMarket(true); split.renderList(); ctx.toast({ title: 'Marketplace updated', sound: 'select' }); } }));
+        pane.append(button('Refresh now', { icon: 'restart', onActivate: async () => { await loadMarket(true); afterMarket(); ctx.toast({ title: 'Marketplace updated', sound: 'select' }); } }));
         return;
       }
       const sec = data && data.sections.find((s) => s.id === id);
@@ -318,7 +327,7 @@ export function marketBlade(ctx) {
       content.append(split.root);
       split.select('accounts');
       loadAccounts();
-      loadMarket().then(() => split.renderList());
+      loadMarket().then(afterMarket);
     },
     activate() { split.activate(); loadAccounts(); ctx.setSub(data && data.updatedAt ? `Deals updated ${new Date(data.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''); },
     refresh(what) {

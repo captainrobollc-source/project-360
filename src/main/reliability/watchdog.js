@@ -20,8 +20,12 @@ function log(msg) {
 
 function alive(p) { try { process.kill(p, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
 
+// A read that fails (file being replaced, antivirus lock) falls back to the last good beat
+// instead of counting as "no heartbeat at all".
+let lastGood = null;
 function readBeat() {
-  try { return JSON.parse(fs.readFileSync(heartbeat, 'utf8')); } catch { return null; }
+  try { lastGood = JSON.parse(fs.readFileSync(heartbeat, 'utf8')); } catch { /* keep the last one */ }
+  return lastGood;
 }
 
 function recentCrashes() {
@@ -61,6 +65,11 @@ setInterval(() => {
   lastTick = nowT;
   const beat = readBeat();
   if (beat && beat.state === 'exit') { log('clean exit'); process.exit(0); }
+  // Restart/shut down requested: don't judge (or relaunch) while Windows is shutting down.
+  if (beat && beat.state === 'poweroff' && nowT - beat.t < 150000) {
+    if (!alive(pid)) { log('dashboard stopped for restart/shutdown'); process.exit(0); }
+    return;
+  }
   // A newer instance (restart, restore, update) owns the heartbeat now: not ours to watch.
   if (beat && beat.pid && beat.pid !== pid) { log(`handed over to pid ${beat.pid}`); process.exit(0); }
   if (!alive(pid)) {

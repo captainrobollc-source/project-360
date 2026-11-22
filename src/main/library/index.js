@@ -98,7 +98,10 @@ class Library extends EventEmitter {
 
   async scan() {
     if (this.scanning) {
-      if (!this.rescanAfter) this.rescanAfter = this.scanning.then(() => { this.rescanAfter = null; return this.scan(); });
+      if (!this.rescanAfter) {
+        const again = () => { this.rescanAfter = null; return this.scan(); };
+        this.rescanAfter = this.scanning.then(again, again); // even if the running scan failed
+      }
       return this.rescanAfter;
     }
     this.scanning = (async () => {
@@ -115,7 +118,7 @@ class Library extends EventEmitter {
       }));
       for (const [name, res] of results) {
         if (res.ok) okSources.add(name);
-        for (const g of res.games) {
+        for (const g of res.games || []) {
           if (next[g.id]) continue; // first scanner wins (e.g. Steam over a steam:// .url)
           const prev = old[g.id] || removed[g.id] || {};
           next[g.id] = {

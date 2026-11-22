@@ -32,6 +32,8 @@ async function launchExplorer() {
 // Set by main: save everything and tell the watchdog this is a clean exit.
 let beforePowerOff = () => {};
 function onPowerOff(fn) { beforePowerOff = fn; }
+const exitHooks = []; // run before quitting to the desktop
+function onExit(fn) { exitHooks.push(fn); }
 
 async function power(action) {
   switch (action) {
@@ -53,6 +55,7 @@ async function power(action) {
       // Guaranteed way back to Windows: start explorer (it becomes the shell if none is
       // running) and quit with code 64 so the shell launcher doesn't relaunch us.
       if (!(await isExplorerRunning())) await launchExplorer();
+      for (const fn of exitHooks) { try { fn(); } catch { /* ignore */ } }
       setTimeout(() => app.exit(64), 300);
       return true;
     default:
@@ -109,4 +112,4 @@ async function setGameBarButton(enabled) {
   return getGameBarButton();
 }
 
-module.exports = { getGameBarButton, setGameBarButton, power, getStartup, setStartup, getShellMode, setShellMode, launchExplorer, isExplorerRunning, onPowerOff };
+module.exports = { getGameBarButton, setGameBarButton, power, getStartup, setStartup, getShellMode, setShellMode, launchExplorer, isExplorerRunning, onPowerOff, onExit };

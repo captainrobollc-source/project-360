@@ -9,16 +9,30 @@ let heartbeatFile = null;
 let beatTimer = null;
 
 let exiting = false;
+// Written to a temp file and renamed, so the watchdog never reads a half-written (empty) file.
+function writeBeat(obj) {
+  if (!heartbeatFile) return;
+  const tmp = `${heartbeatFile}.tmp`;
+  try { fs.writeFileSync(tmp, JSON.stringify(obj)); fs.renameSync(tmp, heartbeatFile); }
+  catch { try { fs.writeFileSync(heartbeatFile, JSON.stringify(obj)); } catch { /* ignore */ } }
+}
+// Restart/shut down was requested: Windows may still cancel it ("apps are preventing shutdown"),
+// so pause the watchdog for two minutes instead of ending it.
+let pausedUntil = 0;
+function markPowerOff() {
+  pausedUntil = Date.now() + 120000;
+  writeBeat({ t: Date.now(), state: 'poweroff', pid: process.pid });
+}
 function markExit() {
   exiting = true;
   clearInterval(beatTimer); // a late beat must not overwrite the exit marker
   if (!heartbeatFile) return;
-  try { fs.writeFileSync(heartbeatFile, JSON.stringify({ t: Date.now(), state: 'exit' })); } catch { /* ignore */ }
+  writeBeat({ t: Date.now(), state: 'exit' });
 }
 
 function beat() {
-  if (exiting || !heartbeatFile) return;
-  try { fs.writeFileSync(heartbeatFile, JSON.stringify({ t: Date.now(), state: 'ok', pid: process.pid })); } catch { /* ignore */ }
+  if (exiting || !heartbeatFile || Date.now() < pausedUntil) return;
+  writeBeat({ t: Date.now(), state: 'ok', pid: process.pid });
 }
 
 function watchdogScript() {
@@ -91,4 +105,4 @@ function guardWindow(win, name, { onRecovered } = {}) {
   win.on('responsive', () => clearTimeout(hangTimer));
 }
 
-module.exports = { setup, guardWindow, markExit, beat, logger };
+module.exports = { setup, guardWindow, markExit, markPowerOff, beat, logger };

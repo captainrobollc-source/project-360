@@ -259,6 +259,7 @@ async function refresh({ cacheFile, country }) {
   const steam = steamOk ? s.value : fromCache(cache, 'steam');
   const epic = epicOk ? e.value : fromCache(cache, 'epic');
   const data = { updatedAt: Date.now(), country, sections: assemble(steam, epic), raw: { steam, epic } };
+  if (!steamOk || !epicOk) data.retryAt = Date.now() + 5 * 60000; // half the deals are missing: try again soon
   writeCache(cacheFile, data);
   const out = { updatedAt: data.updatedAt, offline: false, sections: data.sections };
   if (!steamOk || !epicOk) {
@@ -272,7 +273,7 @@ async function getMarket({ cacheFile, country = 'US', maxAgeMs = 3600000, force 
   country = String(country || 'US').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 2) || 'US';
   if (!force) {
     const cache = readCache(cacheFile);
-    if (cache && cache.updatedAt && (cache.country || 'US') === country && Date.now() - cache.updatedAt < maxAgeMs) {
+    if (cache && cache.updatedAt && (cache.country || 'US') === country && Date.now() - cache.updatedAt < maxAgeMs && !(cache.retryAt && Date.now() > cache.retryAt)) {
       return { updatedAt: cache.updatedAt, offline: false, cached: true, sections: cache.sections };
     }
   }

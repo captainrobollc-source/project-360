@@ -286,6 +286,7 @@ class ArtManager extends EventEmitter {
     let current = null;
     const put = (kind, buf, opts = {}) => {
       if (!buf || art[kind] || checkImage(kind, buf, opts)) return false;
+      if ((this.manualAt.get(id) || 0) > t0) return false; // picked by hand while this job ran
       fs.writeFileSync(path.join(dir, kind), buf);
       art[kind] = Date.now();
       if (current) used[kind] = current;

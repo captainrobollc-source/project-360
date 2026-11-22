@@ -1,6 +1,7 @@
 const { execFile } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function run(file, args, opts = {}) {
@@ -10,19 +11,55 @@ function run(file, args, opts = {}) {
   });
 }
 
-// Parses `reg query <key> /s` output into { 'HKEY_...\\sub': { valueName: value } }.
+// Reads a registry key into { 'HKEY_...\\sub': { valueName: value } } (the key first, then its
+// subkeys; with recursive = false only direct subkeys, without their values).
+// `reg export` writes UTF-16, so names and paths outside ASCII (D:\Игры, Éditions) come back
+// exactly; `reg query` output is in the console's OEM code page and can't be decoded reliably.
 async function regQuery(key, recursive = false) {
-  const args = ['query', key];
-  if (recursive) args.push('/s');
-  const { err, stdout } = await run('reg.exe', args);
-  if (err && !stdout) return {};
+  const tmp = path.join(os.tmpdir(), `p360-reg-${process.pid}-${crypto.randomBytes(4).toString('hex')}.reg`);
+  try {
+    const { err } = await run('reg.exe', ['export', key, tmp, '/y']);
+    if (err || !fs.existsSync(tmp)) return {};
+    const all = parseRegFile(fs.readFileSync(tmp));
+    const keys = Object.keys(all);
+    if (!keys.length || recursive) return all;
+    const root = keys[0];
+    const out = { [root]: all[root] };
+    for (const k of keys.slice(1)) {
+      const rest = k.slice(root.length + 1);
+      if (k.toLowerCase().startsWith(root.toLowerCase() + '\\') && rest && !rest.includes('\\')) out[k] = {};
+    }
+    return out;
+  } finally {
+    try { fs.unlinkSync(tmp); } catch { /* not created */ }
+  }
+}
+
+// REGEDIT5 .reg file → { key: { name: value } }. Strings are unescaped; REG_EXPAND_SZ/MULTI_SZ
+// hex is decoded; DWORDs become "0x…" like reg query prints them.
+function parseRegFile(buf) {
+  let text = buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le', 2) : buf.toString('utf8');
+  text = text.replace(/\\\r?\n\s*/g, ''); // hex values continue over several lines
   const out = {};
   let cur = null;
-  for (const raw of stdout.split(/\r?\n/)) {
-    if (!raw.trim()) continue;
-    if (/^HKEY_/i.test(raw)) { cur = raw.trim(); out[cur] = out[cur] || {}; continue; }
-    const m = raw.match(/^\s{4}(.*?)\s{4}(REG_\w+)\s{4}?(.*)$/);
-    if (m && cur) out[cur][m[1] === '(Default)' ? '' : m[1]] = m[3] || '';
+  const unq = (s) => s.replace(/\\(.)/g, '$1');
+  for (const line of text.split(/\r?\n/)) {
+    const sec = line.match(/^\[(HKEY_[^\]]+)\]\s*$/);
+    if (sec) { cur = sec[1]; out[cur] = out[cur] || {}; continue; }
+    if (!cur) continue;
+    const m = line.match(/^(@|"((?:[^"\\]|\\.)*)")=(.*)$/);
+    if (!m) continue;
+    const name = m[1] === '@' ? '' : unq(m[2]);
+    const v = m[3];
+    let val;
+    if (v.startsWith('"')) val = unq(v.slice(1, v.lastIndexOf('"')));
+    else if (v.startsWith('dword:')) val = `0x${parseInt(v.slice(6), 16).toString(16)}`;
+    else if (/^hex\((2|7)\):/.test(v)) {
+      const bytes = Buffer.from(v.slice(v.indexOf(':') + 1).split(',').filter(Boolean).map((x) => parseInt(x, 16)));
+      val = bytes.toString('utf16le').replace(/\0+$/, '');
+      if (v.startsWith('hex(7)')) val = val.split('\0').join('\\0');
+    } else val = v;
+    out[cur][name] = val;
   }
   return out;
 }
@@ -33,8 +70,10 @@ async function regValue(key, name) {
   return k ? res[k][name] : undefined;
 }
 
+// Output as UTF-8 (by default Windows PowerShell writes the console's OEM code page into a pipe,
+// which garbles accents, ™ and non-Latin text).
 function powershell(script, timeout = 60000) {
-  return run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeout });
+  return run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; ${script}`], { timeout });
 }
 
 function hash(s) { return crypto.createHash('sha1').update(String(s).toLowerCase()).digest('hex').slice(0, 12); }

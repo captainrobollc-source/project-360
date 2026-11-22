@@ -18,20 +18,29 @@ export function retroBlade(ctx) {
   let st = null;
   const load = async () => { try { st = await window.p360.emu.status(); } catch { st = null; } return st; };
   let moveVal = null; // the progress text of the "Moving to…" row, updated in place
+  // Everything a page shows except move progress: progress ticks every 250 ms during a move and
+  // must not rebuild a cover grid each time.
+  const sigOf = (s) => JSON.stringify({ ...s, move: s && s.move ? 1 : 0 });
+  let lastSig = '';
   window.p360.on('emu:updated', (s) => {
     const wasMoving = !!(st && st.move);
+    const sig = sigOf(s);
+    const changed = sig !== lastSig;
+    lastSig = sig;
     st = s;
     const cur = split.current();
     if (cur === 'bios' && (wasMoving !== !!s.move)) split.rerender();
     else if (cur === 'bios' && s.move && moveVal && moveVal.isConnected) moveVal.textContent = moveText(s.move);
+    else if (!changed) return;
     else if (cur === 'emulators' || (cur && cur.startsWith('sys:'))) split.rerender();
     else split.renderList();
   });
 
   // ---- moving the Emulation folder to another drive
   let planning = false;
+  let moveStarting = false; // confirmed, waiting for the move to report in
   async function moveDrive(row) {
-    if (planning || (st && st.move)) return;
+    if (planning || moveStarting || (st && st.move)) return;
     planning = true;
     const val = row && row.querySelector('.val');
     const was = val ? val.textContent : '';
@@ -57,7 +66,10 @@ export function retroBlade(ctx) {
     });
     if (!ok) return;
     // Progress shows on this page; main reports how it ended.
-    window.p360.emu.move(pick).catch(() => {}).finally(() => load().then(() => { if (split.current() === 'bios') split.rerender(); }));
+    moveStarting = true;
+    const v = row && row.querySelector('.val');
+    if (v) v.textContent = 'Starting…';
+    window.p360.emu.move(pick).catch(() => {}).finally(() => { moveStarting = false; load().then(() => { if (split.current() === 'bios') split.rerender(); }); });
   }
 
   async function cancelMove() {

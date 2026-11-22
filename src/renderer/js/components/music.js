@@ -18,8 +18,14 @@ function publish(force = false) {
 audio.addEventListener('timeupdate', () => publish());
 audio.addEventListener('play', () => publish(true));
 audio.addEventListener('pause', () => publish(true));
+let failures = 0; // tracks in a row that couldn't play
 audio.addEventListener('ended', () => next());
-audio.addEventListener('error', () => { if (queue.length > 1) setTimeout(next, 400); });
+audio.addEventListener('playing', () => { failures = 0; });
+audio.addEventListener('error', () => {
+  failures++;
+  if (queue.length > 1 && failures < queue.length) setTimeout(next, 400);
+  else { failures = 0; stop(); }
+});
 
 function load(i) {
   if (!queue.length) return;

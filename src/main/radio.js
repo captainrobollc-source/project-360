@@ -62,6 +62,7 @@ function audioFor(d, audio) {
   return audio.find((a) => mac && a.mac === mac) || audio.find((a) => a.name && nameKey(a.name) === nameKey(d.name)) || null;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let scanGen = 0; // a scan start that was overtaken by a stop is dropped
 
 // Battery levels: AirPods/Beats broadcasts (left, right, case) or what Windows reads from a
 // connected headset. Refreshed while System › Bluetooth asks for the list.
@@ -193,9 +194,13 @@ const api = {
     return fetchPaired();
   },
   async scan(on) {
+    const my = ++scanGen;
     await ensure();
     seen.clear();
-    if (on) { try { await api.paired(); } catch { /* filter with what we have */ } }
+    if (on) {
+      try { await api.paired(); } catch { /* filter with what we have */ }
+      if (my !== scanGen) return false; // stopped (dialog closed) while we were getting ready
+    }
     return helper.call(on ? 'bt.scan.start' : 'bt.scan.stop');
   },
   async pair(id) {

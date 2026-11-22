@@ -62,9 +62,13 @@ export function gamesBlade(ctx) {
     return out.sort(by);
   }
 
-  function renderShelves() {
+  function shelfChips() {
     const sources = [...new Set(state.library.filter(isMainGame).map((g) => g.source))];
-    const chips = [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
+    return [['all', 'All games'], ['recent', 'Recently played'], ['fav', 'Favorites'], ...['steam', 'epic', 'gog', 'xbox', 'local', 'rom'].filter((s) => sources.includes(s)).map((s) => [s, SOURCE_LABEL[s]])];
+  }
+
+  function renderShelves() {
+    const chips = shelfChips();
     if (!chips.some(([k]) => k === filter)) filter = 'all';
     const focusedChip = focus.current && focus.current.dataset.chip;
     shelves.replaceChildren();
@@ -104,11 +108,22 @@ export function gamesBlade(ctx) {
       if (!g) continue;
       keep.add(g.id);
       let el = pool.get(g.id);
+      // What the cover shows; when art arrives or the game is (un)favorited the tile is rebuilt.
+      const look = `${g.title}|${g.favorite ? 1 : 0}|${JSON.stringify(g.art || {})}|${JSON.stringify(g.artSources || {})}`;
+      if (el && el._look !== look) {
+        const tile = coverTile(g);
+        tile.removeAttribute('data-focus');
+        el.replaceChildren(tile);
+        el._look = look;
+      }
       if (!el) {
         const tile = coverTile(g);
         tile.removeAttribute('data-focus'); // the carousel keeps one focus target (carFocus); mouse hover mustn't steal it
         el = h('div.ci.reflect', {}, tile);
-        el.addEventListener('click', () => { const i = games.indexOf(g); if (i === idx) launchGame(g.id); else { idx = i; layoutCarousel(); } });
+        el._look = look;
+        const id = g.id;
+        // Look the game up by id: after a library update `games` holds new objects.
+        el.addEventListener('click', () => { const i = games.findIndex((x) => x.id === id); if (i < 0) return; if (i === idx) launchGame(id); else { idx = i; layoutCarousel(); } });
         const t0 = transformFor(d > 0 ? d + 1 : d - 1);
         el.style.transform = t0.t;
         el.style.opacity = '0';
@@ -171,6 +186,7 @@ export function gamesBlade(ctx) {
 
   function rebuild({ toItems = false } = {}) {
     const prevId = games[idx] && games[idx].id;
+    if (!shelfChips().some(([k]) => k === filter)) filter = 'all'; // that store's games are gone
     games = list();
     const keep = prevId ? games.findIndex((g) => g.id === prevId) : -1;
     idx = keep >= 0 && !toItems ? keep : Math.min(idx, Math.max(0, games.length - 1));

@@ -3,7 +3,9 @@
 // (art choices, metadata). Automatic once a day and before updates; manual backup/restore,
 // plus export/import to a single .p360backup file.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const { hash } = require('../library/util');
 
 const FILES = ['settings.json', 'userdata.json', 'emulation.json', 'library.json'];
 const KEEP = 15;
@@ -68,7 +70,49 @@ class Backups {
     }
     if (!Object.keys(files).length) throw new Error('That backup is empty');
     this.create('before-restore', path.basename(id)); // and keep the one being restored
+    this.keepEmulationLocation(files);
     for (const [f, buf] of Object.entries(files)) fs.writeFileSync(path.join(this.userDir, f), buf);
+  }
+
+  // The Emulation folder belongs to this PC as it is now: a backup from before a move (or from
+  // another PC) mustn't point back at an old, emptied location. Keep the current folder and its
+  // emulator setup, and carry emulated games' playtime and favorites over to their current ids.
+  keepEmulationLocation(files) {
+    const read = (name) => { try { return JSON.parse(fs.readFileSync(path.join(this.userDir, name), 'utf8')); } catch { return null; } };
+    const parse = (v) => { try { return JSON.parse(Buffer.isBuffer(v) ? v.toString('utf8') : v); } catch { return null; } };
+    const cur = read('settings.json');
+    const next = files['settings.json'] && parse(files['settings.json']);
+    if (!cur || !next) return;
+    const home = path.join(os.homedir(), 'Emulation');
+    const curRoot = (cur.emulation && cur.emulation.root) || home;
+    const oldRoot = (next.emulation && next.emulation.root) || home;
+    if (!fs.existsSync(curRoot)) return; // nothing here to keep
+    next.emulation = { ...(next.emulation || {}), root: (cur.emulation && cur.emulation.root) || '', extraFolders: (cur.emulation && cur.emulation.extraFolders) || {} };
+    files['settings.json'] = JSON.stringify(next, null, 2);
+    try { files['emulation.json'] = fs.readFileSync(path.join(this.userDir, 'emulation.json')); } catch { delete files['emulation.json']; }
+    if (path.resolve(curRoot).toLowerCase() === path.resolve(oldRoot).toLowerCase()) return;
+    // Emulated game ids are made from their file paths: map the backup's ids to today's.
+    const lib = files['library.json'] && parse(files['library.json']);
+    if (!lib || !lib.games) return;
+    const ren = new Map();
+    const inside = (p, dir) => { const r = path.relative(path.resolve(dir), path.resolve(p)); return r && !r.startsWith('..') && !path.isAbsolute(r); };
+    for (const [id, g] of Object.entries(lib.games)) {
+      if (!g || !g.systemId || !g.romPath || !inside(g.romPath, oldRoot)) continue;
+      const romPath = path.join(curRoot, path.relative(oldRoot, g.romPath));
+      const nid = `rom:${hash(romPath)}`;
+      delete lib.games[id];
+      lib.games[nid] = { ...g, id: nid, romPath, installDir: path.dirname(romPath) };
+      ren.set(id, nid);
+    }
+    if (!ren.size) return;
+    files['library.json'] = JSON.stringify(lib, null, 2);
+    const ud = files['userdata.json'] && parse(files['userdata.json']);
+    if (!ud || !ud.profiles) return;
+    for (const p of Object.values(ud.profiles)) {
+      if (p && p.games) for (const [a, b] of ren) if (p.games[a]) { p.games[b] = { ...(p.games[b] || {}), ...p.games[a] }; delete p.games[a]; }
+      if (p && Array.isArray(p.sessions)) for (const s of p.sessions) if (s && ren.has(s.id)) s.id = ren.get(s.id);
+    }
+    files['userdata.json'] = JSON.stringify(ud, null, 2);
   }
 
   exportTo(file) {
@@ -89,9 +133,10 @@ class Backups {
       JSON.parse(text); // refuse broken files
     }
     this.create('before-import');
-    for (const [name, text] of Object.entries(data.files)) {
-      if (FILES.includes(name)) fs.writeFileSync(path.join(this.userDir, name), text);
-    }
+    const files = {};
+    for (const [name, text] of Object.entries(data.files)) if (FILES.includes(name)) files[name] = text;
+    this.keepEmulationLocation(files);
+    for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(this.userDir, name), text);
   }
 }
 

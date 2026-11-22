@@ -31,7 +31,9 @@ export function captureKeys(fn) {
 
 // Buttons/keys still held right now stop counting until they're released (a menu that pops up
 // mid-game mustn't receive the stick that was steering, or its auto-repeat).
+let suppressGen = 0;
 export function suppressHeld() {
+  suppressGen++; // sources that haven't reported since (the overlay's pads) ignore what's held at their next report
   for (const src of Object.values(sources)) {
     for (const t of Object.values(src.timers)) clearTimeout(t);
     src.timers = {};
@@ -43,7 +45,7 @@ const downKeys = new Set();
 
 let reportedSlot = -1;
 export function resetActivity() { reportedSlot = -1; }
-function fire(action, slot, device) {
+function fire(action, slot, device, repeat = false) {
   lastDevice = device;
   if (device === 'pad') {
     lastSlot = slot;
@@ -51,7 +53,7 @@ function fire(action, slot, device) {
     // Another player's controller: their profile takes over the dashboard.
     if (slot !== reportedSlot) { reportedSlot = slot; window.p360.profiles.activity(slot).catch(() => {}); }
   }
-  handler(action, { slot, device });
+  handler(action, { slot, device, repeat });
 }
 
 function scheduleCursorHide() {
@@ -60,15 +62,29 @@ function scheduleCursorHide() {
   cursorTimer = setTimeout(() => document.body.classList.add('hide-cursor'), 2000);
 }
 
+const BACK_START = (1 << BITS.back) | (1 << BITS.start);
 function feed(key, mask, slot, { allowGuide }) {
-  const src = sources[key] || (sources[key] = { mask: 0, timers: {}, ignore: 0 });
+  // A new source, or the first report after suppressHeld(): whatever is already held (the trigger
+  // that was accelerating when the Guide opened) doesn't count until it's released.
+  const src = sources[key] || (sources[key] = { mask: 0, timers: {}, ignore: 0, gen: -1, pendingBS: 0, chord: false });
+  if (src.gen !== suppressGen) { src.gen = suppressGen; src.ignore = mask; }
   src.ignore = (src.ignore || 0) & mask; // released buttons count again
   const pressed = mask & ~src.mask & ~src.ignore;
   const released = src.mask & ~mask;
   src.mask = mask;
+  // Back+Start together opens the Guide (main handles that). With the chord on, Back and Start
+  // act on release, and only if the other one wasn't pressed meanwhile.
+  const chordOn = setting('console.backStartGuide') !== false;
+  if (chordOn && (mask & BACK_START) === BACK_START) src.chord = true;
   for (const [name, bit] of Object.entries(BITS)) {
     const m = 1 << bit;
     if (released & m) { clearTimeout(src.timers[name]); delete src.timers[name]; }
+    if (chordOn && (m & BACK_START)) {
+      if (pressed & m) src.pendingBS |= m;
+      else if ((released & m) && (src.pendingBS & m)) { src.pendingBS &= ~m; if (!src.chord) fire(name, slot, 'pad'); }
+      if (!(mask & BACK_START)) src.chord = false;
+      continue;
+    }
     if (!(pressed & m)) continue;
     if (name === 'guide' && !allowGuide) continue; // native Guide is handled globally by main
     fire(name, slot, 'pad');
@@ -76,7 +92,7 @@ function feed(key, mask, slot, { allowGuide }) {
       let delay = 110;
       const tick = () => {
         if (!(src.mask & m) || (src.ignore & m)) return;
-        fire(name, slot, 'pad');
+        fire(name, slot, 'pad', true);
         delay = Math.max(55, delay - 8);
         src.timers[name] = setTimeout(tick, delay);
       };

@@ -30,16 +30,19 @@ export function listenForPairing() {
         onClose: () => { answer(false); pinPrompt = null; },
       });
     } else if (ev.kind === 'providePin') {
-      const pin = await osk({ title: `PIN for ${name}`, placeholder: 'Often 0000 or 1234', maxLength: 16 });
+      const ask = osk({ title: `PIN for ${name}`, placeholder: 'Often 0000 or 1234', maxLength: 16 });
+      pinPrompt = ask; // closed (as cancelled) if pairing ends first
+      const pin = await ask;
+      if (pinPrompt === ask) pinPrompt = null;
       window.p360.bt.reply(ev.id, pin !== null && pin !== '', pin || '').catch(() => {});
     } else if (ev.kind === 'displayPin') {
       window.p360.bt.reply(ev.id, true, '').catch(() => {});
       pinPrompt = modal({
         build(panel, close) {
           panel.append(h('h3', {}, `Type this PIN on ${name}`), h('div.bigpin', {}, ev.pin), h('p', {}, 'Then press Enter on the device.'),
-            h('div.btns', {}, button('Cancel', { onActivate: () => close(null) })));
+            h('div.btns', {}, button('Cancel', { onActivate: () => close('cancel') })));
         },
-        onClose: () => { pinPrompt = null; },
+        onClose: (v) => { pinPrompt = null; if (v === 'cancel' || v === null) window.p360.bt.scan(false).catch(() => {}); },
       });
     } else {
       window.p360.bt.reply(ev.id, true, '').catch(() => {});

@@ -19,7 +19,7 @@ const driveOf = (p) => path.parse(path.resolve(p)).root.toLowerCase();
 async function inventory(dir, signal) {
   const files = [];
   const dirs = [];
-  let links = 0;
+  const linkPaths = [];
   let bytes = 0;
   let largest = null;
   const stack = [''];
@@ -31,7 +31,7 @@ async function inventory(dir, signal) {
     catch { throw new Error(`Couldn’t read ${path.join(dir, rel)}`); }
     for (const e of entries) {
       const r = path.join(rel, e.name);
-      if (e.isSymbolicLink()) { links++; continue; }
+      if (e.isSymbolicLink()) { linkPaths.push(r); continue; }
       if (e.isDirectory()) { dirs.push(r); stack.push(r); continue; }
       if (!e.isFile()) continue;
       let st;
@@ -41,7 +41,7 @@ async function inventory(dir, signal) {
       if (!largest || st.size > largest.size) largest = { rel: r, size: st.size };
     }
   }
-  return { files, dirs, links, bytes, largest };
+  return { files, dirs, links: linkPaths.length, linkPaths, bytes, largest };
 }
 
 function abortError() { const e = new Error('Move cancelled'); e.cancelled = true; return e; }
@@ -63,7 +63,7 @@ async function copyOne(src, dst, f, onBytes, signal) {
     await pipeline(
       fs.createReadStream(src, { highWaterMark: 1 << 20 }),
       async function* count(source) { for await (const chunk of source) { onBytes(chunk.length); yield chunk; } },
-      fs.createWriteStream(dst, { flags: 'wx' }),
+      fs.createWriteStream(dst, { flags: 'wx', flush: true }), // on disk before the original is deleted
       { signal },
     );
     try { await fs.promises.utimes(dst, f.atime, f.mtime); } catch { /* keep the copy's own times */ }

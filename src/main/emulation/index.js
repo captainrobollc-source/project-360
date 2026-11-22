@@ -35,28 +35,49 @@ function titleFrom(file) {
   return path.basename(file, path.extname(file)).replace(/[_.]+/g, ' ').replace(/\s*[([].*?[)\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function writeIni(file, sections) {
-  // Merge into an existing INI, keeping keys we don't manage.
-  let text = '';
-  try { text = fs.readFileSync(file, 'utf8'); } catch { /* new */ }
-  const data = {};
-  let cur = '';
-  for (const line of text.split(/\r?\n/)) {
-    const sec = line.match(/^\s*\[(.+)\]\s*$/);
-    if (sec) { cur = sec[1]; data[cur] = data[cur] || {}; continue; }
-    const kv = line.match(/^\s*([^=;#]+?)\s*=\s*(.*)$/);
-    if (kv) (data[cur] = data[cur] || {})[kv[1]] = kv[2];
-  }
-  for (const [s, kv] of Object.entries(sections)) data[s] = { ...(data[s] || {}), ...kv };
+// Sets the keys we manage in an INI (or simple TOML) file, editing lines in place. Everything else
+// is kept exactly: other keys, repeated keys (DuckStation/PCSX2 lists), comments, order.
+function writeIni(file, sections, eol = '\r\n') {
+  let lines = [];
+  try { lines = fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { /* new */ }
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  const todo = {};
+  for (const [s, kv] of Object.entries(sections)) todo[s] = { ...kv };
   const out = [];
-  for (const [s, kv] of Object.entries(data)) {
-    if (s) out.push(`[${s}]`);
-    for (const [k, v] of Object.entries(kv)) out.push(`${k} = ${v}`);
-    out.push('');
+  const finishSection = (sec) => {
+    const rest = todo[sec];
+    if (!rest) return;
+    delete todo[sec];
+    const keys = Object.entries(rest);
+    if (!keys.length) return;
+    let blanks = 0;
+    while (out.length && out[out.length - 1].trim() === '') { out.pop(); blanks++; }
+    for (const [k, v] of keys) out.push(`${k} = ${v}`);
+    while (blanks-- > 0) out.push('');
+  };
+  let cur = '';
+  for (const line of lines) {
+    const sec = line.match(/^\s*\[(.+)\]\s*$/);
+    if (sec) { finishSection(cur); cur = sec[1].trim(); out.push(line); continue; }
+    const kv = line.match(/^\s*([^=;#]+?)\s*=/);
+    if (kv && todo[cur] && Object.prototype.hasOwnProperty.call(todo[cur], kv[1])) {
+      out.push(`${kv[1]} = ${todo[cur][kv[1]]}`);
+      delete todo[cur][kv[1]];
+      continue;
+    }
+    out.push(line);
+  }
+  finishSection(cur);
+  for (const sec of Object.keys(todo)) {
+    if (!Object.keys(todo[sec]).length) continue;
+    if (out.length) out.push('');
+    if (sec) out.push(`[${sec}]`);
+    finishSection(sec);
   }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, out.join('\r\n'));
+  fs.writeFileSync(file, out.join(eol) + eol);
 }
+const tomlStr = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 class Emulation extends EventEmitter {
   constructor({ userDir, settings }) {
@@ -120,7 +141,11 @@ class Emulation extends EventEmitter {
     const missing = [];
     const optionalMissing = [];
     for (const b of sys.bios) {
-      const has = b.files.some((f) => lower.has(f.toLowerCase()) || fs.existsSync(path.join(dir, f))) || (b.match && files.some((f) => b.match.test(f)));
+      const sizeOk = (f) => {
+        if (!b.minSize && !b.maxSize) return true;
+        try { const n = fs.statSync(path.join(dir, f)).size; return (!b.minSize || n >= b.minSize) && (!b.maxSize || n <= b.maxSize); } catch { return false; }
+      };
+      const has = b.files.some((f) => lower.has(f.toLowerCase()) || fs.existsSync(path.join(dir, f))) || (b.match && files.some((f) => b.match.test(f) && sizeOk(f)));
       if (!has) (b.optional ? optionalMissing : missing).push(b.files.join(' or '));
     }
     return { ok: !missing.length, missing, optionalMissing, optional: sys.bios.every((b) => b.optional) };
@@ -224,11 +249,14 @@ class Emulation extends EventEmitter {
   }
 
   // ------------------------------------------------------------------ install
-  async install(id) {
+  install(id) {
+    if (!EMULATORS.some((e) => e.id === id)) return Promise.reject(new Error('Unknown emulator'));
+    return this.once(`install:${id}`, () => this.installNow(id));
+  }
+
+  async installNow(id) {
     const emu = EMULATORS.find((e) => e.id === id);
-    if (!emu) throw new Error('Unknown emulator');
     this.notMoving();
-    if (this.progress[id] && ['resolving', 'downloading', 'extracting'].includes(this.progress[id].phase)) return;
     try {
       this.setProgress(id, { phase: 'resolving', received: 0, total: 0, error: null });
       const src = await emu.source();
@@ -326,11 +354,16 @@ class Emulation extends EventEmitter {
       fs.writeFileSync(path.join(dir, 'portable.txt'), '');
     } else if (id === 'xemu') {
       const b = (n) => { const f = findFile(d.bios, new RegExp(`^${n}$`, 'i'), 0); return f ? fwd(f) : ''; };
-      fs.writeFileSync(path.join(dir, 'xemu.toml'), [
-        '[general]', 'show_welcome = false', '',
-        '[display.window]', 'fullscreen_on_startup = true', '',
-        '[sys.files]', `bootrom_path = '${b('mcpx_1.0.bin')}'`, `flashrom_path = '${b('complex_4627.bin')}'`, `hdd_path = '${b('xbox_hdd.qcow2')}'`, '',
-      ].join('\n'));
+      const files = {};
+      for (const [key, name] of [['bootrom_path', 'mcpx_1.0.bin'], ['flashrom_path', 'complex_4627.bin'], ['hdd_path', 'xbox_hdd.qcow2']]) {
+        const f = b(name);
+        if (f) files[key] = tomlStr(f); // found in the BIOS folder; otherwise leave the user's setting
+      }
+      writeIni(path.join(dir, 'xemu.toml'), {
+        general: { show_welcome: 'false' },
+        'display.window': { fullscreen_on_startup: 'true' },
+        'sys.files': files,
+      }, '\n');
     }
   }
 
@@ -361,7 +394,9 @@ class Emulation extends EventEmitter {
       try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
         const f = path.join(d, e.name);
-        if (e.isDirectory()) {
+        let isDir = e.isDirectory();
+        if (e.isSymbolicLink()) { try { isDir = fs.statSync(f).isDirectory(); } catch { continue; } } // junction / symlink
+        if (isDir) {
           // Folder-based games
           if (sys.folders === 'ps3') {
             const eboot = [path.join(f, 'PS3_GAME', 'USRDIR', 'EBOOT.BIN'), path.join(f, 'USRDIR', 'EBOOT.BIN')].find((x) => fs.existsSync(x));
@@ -523,7 +558,12 @@ class Emulation extends EventEmitter {
       if (mv.inside(to, from) || mv.inside(from, to)) throw new Error('Pick a different drive');
       this.moving.to = to;
       this.setProgress('move', { to });
+      try { fs.unlinkSync(path.join(from, MOVE_MARKER)); } catch { /* none (normal) */ }
       const inv = await mv.inventory(from, ctrl.signal);
+      if (inv.linkPaths.length) {
+        const names = inv.linkPaths.slice(0, 3).join(', ') + (inv.linkPaths.length > 3 ? ` and ${inv.linkPaths.length - 3} more` : '');
+        throw new Error(`Some folders are links to other places (${names}). Move or replace them yourself first, so nothing gets left behind.`);
+      }
       if (hooks.maxFile && inv.largest && inv.largest.size > hooks.maxFile) {
         throw new Error(`${to.slice(0, 2)} is formatted FAT32, which can’t hold files over 4 GB like ${path.basename(inv.largest.rel)}`);
       }
@@ -551,14 +591,19 @@ class Emulation extends EventEmitter {
       if (hooks.beforeSwitch) await hooks.beforeSwitch();
       this.switchRoot(from, to);
       if (hooks.onSwitch) { try { hooks.onSwitch(from, to); } catch (e) { console.error('[emulation] remap:', e); } }
-      try { this.settings.flush(); } catch { /* saved on the next tick anyway */ }
-      try { this.state.flush(); } catch { /* ignore */ }
+      let saved = false;
+      try { saved = this.settings.flush() !== false && this.state.flush() !== false; } catch { saved = false; }
       try { fs.unlinkSync(path.join(to, MOVE_MARKER)); } catch { /* ignore */ }
       for (const e of EMULATORS) { if (this.exeOf(e.id)) { try { await this.configure(e.id); } catch (err) { console.error('[emulation] configure', e.id, err.message); } } }
 
+      // Only delete the old copy once the new location is safely recorded and still there.
+      if (!saved || !fs.existsSync(path.join(to, 'roms'))) {
+        console.error('[emulation] move: new location not confirmed on disk; keeping the old copy');
+        return { from, to, bytes: inv.bytes, files: inv.files.length, kept: inv.files.length, links: 0 };
+      }
       this.setProgress('move', { phase: 'cleaning' });
       const kept = await mv.removeCopied(from, inv);
-      return { from, to, bytes: inv.bytes, files: inv.files.length, kept, links: inv.links };
+      return { from, to, bytes: inv.bytes, files: inv.files.length, kept, links: 0 };
     } finally {
       this.moving = null;
       this.setProgress('move', null);
@@ -650,18 +695,23 @@ class Emulation extends EventEmitter {
     return this.download(url, path.join(this.dirs().bios, 'PS3UPDAT.PUP'), 'ps3fw');
   }
 
-  async installPs3Firmware() {
+  installPs3Firmware() { return this.once('ps3fw', () => this.installPs3FirmwareNow()); }
+
+  async installPs3FirmwareNow() {
     this.notMoving();
     const exe = this.exeOf('rpcs3');
     if (!exe) throw new Error('Install RPCS3 first');
-    const pup = await this.downloadPs3Firmware();
-    this.setProgress('ps3fw', { phase: 'extracting' });
-    const r = await run(exe, ['--installfw', pup], { cwd: path.dirname(exe), timeout: 15 * 60 * 1000 });
-    this.setProgress('ps3fw', null);
-    if (r.err && typeof r.err.code !== 'number') throw new Error('Firmware install failed');
-    this.state.data.ps3fw = Date.now();
-    this.state.save();
-    return true;
+    try {
+      const pup = await this.downloadPs3Firmware();
+      this.setProgress('ps3fw', { phase: 'extracting' });
+      const r = await run(exe, ['--installfw', pup], { cwd: path.dirname(exe), timeout: 15 * 60 * 1000 });
+      if (r.err && typeof r.err.code !== 'number') throw new Error('Firmware install failed');
+      this.state.data.ps3fw = Date.now();
+      this.state.save();
+      return true;
+    } finally {
+      this.setProgress('ps3fw', null);
+    }
   }
 }
 

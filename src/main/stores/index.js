@@ -13,7 +13,17 @@ const { JsonStore } = require('../store');
 const CONNECTORS = [require('./steam'), require('./epic'), require('./gog'), require('./itch'), require('./humble')];
 const CHROME_UA = () => app.userAgentFallback.replace(/\s(Electron|project-360|Project 360)\/\S+/gi, '');
 
-const safeName = (s) => String(s || 'Game').replace(/[<>:"/\\|?*\x00-\x1f™®©]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Game';
+// A folder name from a (remote) game title: never "." / ".." / empty, no trailing dots or spaces
+// (Windows drops them), no reserved device names.
+const safeName = (s) => {
+  let n = String(s || 'Game').replace(/[<>:"/\\|?*\x00-\x1f™®©]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  n = n.replace(/^[.\s]+|[.\s]+$/g, '');
+  if (!n) return 'Game';
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(n)) n = `${n}_`;
+  return n;
+};
+// Deletes a job folder only if it really is inside the downloads folder.
+const isInside = (p, base) => { const r = path.relative(path.resolve(base), path.resolve(p)); return !!r && !r.startsWith('..') && !path.isAbsolute(r); };
 // File names keep their extension (installers are found by it): only the stem is shortened.
 const safeFileName = (s) => {
   const clean = String(s || 'download.bin').replace(/[<>:"/\\|?*\x00-\x1f™®©]/g, '').replace(/\s+/g, ' ').trim() || 'download.bin';
@@ -188,7 +198,7 @@ class StoreManager extends EventEmitter {
       store: storeId, gameId, optionId: opt.id,
       title: d.title || (game && game.title) || 'Game',
       image: game && game.image, install: opt.install, installAfter: install,
-      dir: path.join(this.downloadDir(), safeName(d.title || (game && game.title))),
+      dir: path.join(this.downloadDir(), `${safeName(d.title || (game && game.title))} ${Date.now().toString(36)}`), // one folder per job
       files: opt.files.map((f) => ({ url: f.url, headers: f.headers, name: f.name, size: f.size || 0, received: 0, done: false, path: null })),
       state: 'queued', createdAt: Date.now(),
     };
@@ -295,7 +305,17 @@ class StoreManager extends EventEmitter {
       this.pending.set(file.url, { resolve, reject, job, file });
       const ses = this.session(job.store);
       ses.downloadURL(file.url, file.headers ? { headers: file.headers } : undefined);
+      // The download never started (the request failed before Chromium created it): don't hold the queue.
+      setTimeout(() => {
+        const p = this.pending.get(file.url);
+        if (p && p.file === file) { this.pending.delete(file.url); reject(new Error('The download didn’t start')); }
+      }, 90000);
     });
+  }
+
+  removeJobDir(j) {
+    if (!j || !j.dir || !isInside(j.dir, this.downloadDir())) return;
+    try { fs.rmSync(j.dir, { recursive: true, force: true }); } catch { /* ignore */ }
   }
 
   onWillDownload(item) {
@@ -310,20 +330,34 @@ class StoreManager extends EventEmitter {
     item.setSavePath(file.path);
     this.items.set(job.id, item);
     let last = { t: Date.now(), b: 0 };
+    let retries = 0;
+    let retryTimer = null;
     item.on('updated', (e, state) => {
       file.received = item.getReceivedBytes();
       if (item.getTotalBytes()) file.size = item.getTotalBytes();
       const now = Date.now();
       if (now - last.t > 1000) { job.speed = Math.round((file.received - last.b) / ((now - last.t) / 1000)); last = { t: now, b: file.received }; }
-      if (state === 'interrupted' && job.state === 'downloading') job.error = 'Connection interrupted — retrying…';
+      if (state === 'progressing' && job.error && !retryTimer) job.error = null; // back on track
+      if (state === 'interrupted' && job.state === 'downloading' && !retryTimer) {
+        // Chromium doesn't resume by itself once it gives up: retry with a growing wait, then fail.
+        if (item.canResume() && retries < 6) {
+          retries++;
+          job.error = `Connection interrupted — retrying (${retries}/6)…`;
+          retryTimer = setTimeout(() => { retryTimer = null; if (job.state === 'downloading') { try { item.resume(); } catch { /* finished meanwhile */ } } }, 5000 * 2 ** (retries - 1));
+        } else {
+          job.error = 'Connection lost';
+          try { item.cancel(); } catch { /* ignore */ }
+        }
+      }
       this.changed();
     });
     item.once('done', (e, state) => {
+      clearTimeout(retryTimer);
       this.items.delete(job.id);
       job.speed = 0;
       if (state === 'completed') { file.done = true; file.received = file.size = item.getTotalBytes() || file.received; this.changed(); resolve(); }
       else if (job.state === 'paused' || job.state === 'cancelled') resolve();
-      else reject(new Error(state === 'cancelled' ? 'Cancelled' : 'Download failed'));
+      else reject(new Error(job.error === 'Connection lost' ? 'The connection was lost. Retry when you’re back online.' : state === 'cancelled' ? 'Cancelled' : 'Download failed'));
     });
   }
 
@@ -354,7 +388,7 @@ class StoreManager extends EventEmitter {
     const it = this.items.get(id);
     if (it) it.cancel();
     if (!wasActive) this.changed(true);
-    try { fs.rmSync(j.dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    this.removeJobDir(j);
   }
 
   remove(id) {
@@ -423,9 +457,10 @@ class StoreManager extends EventEmitter {
     job.state = 'done';
     job.installedDir = dest;
     job.installedExe = installedExe;
+    this.changed(true); // saved now: a crash during the library rescan mustn't re-download it
     // Clean up the installer files once installed.
-    if (this.settings.get('stores.deleteInstallers') !== false) { try { fs.rmSync(job.dir, { recursive: true, force: true }); } catch { /* ignore */ } }
-    if (this.onInstalled) await this.onInstalled({ store: job.store, title: job.title, exe: installedExe, dir: dest });
+    if (this.settings.get('stores.deleteInstallers') !== false) this.removeJobDir(job);
+    if (this.onInstalled) Promise.resolve(this.onInstalled({ store: job.store, title: job.title, exe: installedExe, dir: dest })).catch((e) => console.error('[stores] after install', e.message));
   }
 }
 

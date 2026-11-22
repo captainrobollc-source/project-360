@@ -70,21 +70,25 @@ class JsonStore {
   // After a backup restore the files on disk are the truth: stop writing until the restart.
   freeze() { this.frozen = true; clearTimeout(this.timer); this.timer = null; }
 
+  // Returns true when the data is on disk.
   flush() {
     clearTimeout(this.timer);
     this.timer = null;
-    if (this.frozen) return;
+    if (this.frozen) return false;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = this.file + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-      // Keep the previous good version as .bak (at most once a minute).
+      // Keep the previous good version as .bak (at most once a minute) — only if it is good: after
+      // recovering from a corrupt file, the corrupt one must not replace the backup it came from.
       if (Date.now() - this.lastBak > 60000 && fs.existsSync(this.file)) {
-        try { fs.copyFileSync(this.file, `${this.file}.bak`); this.lastBak = Date.now(); } catch { /* ignore */ }
+        try { JSON.parse(fs.readFileSync(this.file, 'utf8')); fs.copyFileSync(this.file, `${this.file}.bak`); this.lastBak = Date.now(); } catch { /* corrupt or locked: keep the old .bak */ }
       }
       fs.renameSync(tmp, this.file);
+      return true;
     } catch (e) {
       console.error('[store] write failed', this.file, e.message);
+      return false;
     }
   }
 }

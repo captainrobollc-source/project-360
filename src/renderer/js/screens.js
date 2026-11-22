@@ -155,14 +155,14 @@ export function runSetup(stage, { toast }) {
             ? 'Right now Windows opens Xbox Game Bar when you press the Xbox button on your controller. Let Project 360 use it instead to open the Guide — over the dashboard and in games.'
             : 'The Xbox button is already free for Project 360. Press it any time to open the Guide.',
           opts: on ? [
-            button('Use the Xbox button for the Guide', { icon: 'controller', right: 'Recommended', onActivate: async () => { await window.p360.system.gameBar(false); toast({ title: 'Xbox button ready', text: 'It now opens the Guide', sound: 'select' }); next(); } }),
+            button('Use the Xbox button for the Guide', { icon: 'controller', right: 'Recommended', onActivate: () => once(async () => { await window.p360.system.gameBar(false); toast({ title: 'Xbox button ready', text: 'It now opens the Guide', sound: 'select' }); next(); }) }),
             button('Keep Game Bar on the Xbox button', { icon: 'close', onActivate: next }),
           ] : [button('Continue', { icon: 'play', onActivate: next })],
         };
       },
       async () => {
         const b = store.state.browsers || {};
-        const pick = async (v) => { store.set('settings', await window.p360.settings.set('media.browser', v)); next(); };
+        const pick = (v) => once(async () => { store.set('settings', await window.p360.settings.set('media.browser', v)); next(); });
         const opts = [];
         if (b.firefox) opts.push(button('Use Firefox', { icon: 'globe', right: 'Your sign-ins & add-ons', onActivate: () => pick('firefox') }));
         if (b.edge) opts.push(button('Use Microsoft Edge', { icon: 'globe', right: 'Separate kiosk profile', onActivate: () => pick('edge') }));
@@ -209,6 +209,8 @@ export function runSetup(stage, { toast }) {
     // Steps can await (e.g. Game Bar status). A newer render wins, and input waits for it.
     let renderToken = 0;
     let rendering = false;
+    let acting = false; // a step's button is still doing its work
+    const once = async (fn) => { if (acting) return; acting = true; try { await fn(); } finally { acting = false; } };
     async function render({ keepFocus = false } = {}) {
       const my = ++renderToken;
       const keepIdx = keepFocus && focus.current ? [...panel.querySelectorAll('.opts [data-focus]')].indexOf(focus.current) : -1;

@@ -55,6 +55,12 @@ class Launcher extends EventEmitter {
 
   emitState() { this.emit('state', this.state()); }
 
+  // Nothing to look for but the process we started (custom emulator profiles, browser apps).
+  unwatched(c) {
+    const w = c.item.watch || {};
+    return !(w.dirs && w.dirs.length) && !(w.exes && w.exes.length);
+  }
+
   async launch(item, kind = 'game') {
     if (this.current) throw new Error(`${this.current.item.title} is already running`);
     if (this.last.id === item.id && Date.now() - this.last.at < DUPLICATE_WINDOW_MS) throw new Error(`${item.title} is already starting`);
@@ -103,7 +109,7 @@ class Launcher extends EventEmitter {
         });
         c.childPid = child.pid;
         c.childAlive = true;
-        child.on('exit', () => { c.childAlive = false; });
+        child.on('exit', (code) => { c.childAlive = false; c.childExitedAt = Date.now(); c.childExitCode = code; });
         child.unref();
       }
     } catch (e) {
@@ -249,6 +255,18 @@ class Launcher extends EventEmitter {
           } else c.mainGoneAt = 0;
         }
       } else if (c.phase === 'running' && now - c.lastSeen > (c.mainPid ? MAINPID_GRACE_MS : EXIT_GRACE_MS)) {
+        return this.finish('exited');
+      } else if ((c.phase === 'launching' || c.phase === 'untracked') && c.childExitedAt && !c.lastSeen && this.unwatched(c) && now - c.childExitedAt > 3000) {
+        // Tracked only by the process we started, and it's gone without a window ever showing:
+        // it crashed or refused to start (or, for a browser, handed off to a running one).
+        if (c.kind === 'game') {
+          const code = c.childExitCode;
+          this.current = null;
+          this.last = { id: null, at: 0 };
+          this.emitState();
+          this.emit('failed', { item: c.item, error: `${c.item.title} closed right away${code ? ` (exit code ${code})` : ''}` });
+          return;
+        }
         return this.finish('exited');
       } else if (c.phase === 'launching' || c.phase === 'untracked') {
         if (now - c.startedAt > ATTENTION_AFTER_MS) await this.updateAttention(c);

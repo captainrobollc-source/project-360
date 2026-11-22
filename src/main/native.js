@@ -36,13 +36,24 @@ class NativeHelper extends EventEmitter {
       console.warn(`[${this.label}] helper missing (${this.name}.exe)`);
       return;
     }
-    this.proc = spawn(exe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-    this.proc.stdout.setEncoding('utf8');
-    this.proc.stdout.on('data', (chunk) => this.onData(chunk));
-    this.proc.stderr.on('data', (d) => console.error(`[${this.label}]`, d.toString().trim()));
-    const proc = this.proc;
-    this.proc.on('error', (e) => console.error(`[${this.label}] helper failed to start`, e.message));
-    this.proc.on('exit', (code) => {
+    let proc;
+    // spawn() throws for some failures (antivirus or app control blocking the exe): never let that
+    // stop start-up or the restart loop.
+    try { proc = spawn(exe, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    catch (e) {
+      console.error(`[${this.label}] helper failed to start`, e.message);
+      if (!this.stopping && this.restarts++ < 5) setTimeout(() => this.start(), 1000 * this.restarts);
+      return;
+    }
+    this.proc = proc;
+    proc.stdout.setEncoding('utf8');
+    proc.stdout.on('data', (chunk) => this.onData(chunk));
+    proc.stderr.on('data', (d) => console.error(`[${this.label}]`, d.toString().trim()));
+    proc.stdin.on('error', () => { /* the helper died mid-write; 'exit' cleans up */ });
+    let gone = false;
+    const onGone = (code) => {
+      if (gone) return;
+      gone = true;
       if (this.proc === proc) this.proc = null;
       this.ready = false;
       this.buffer = '';
@@ -52,7 +63,10 @@ class NativeHelper extends EventEmitter {
       console.warn(`[${this.label}] helper exited`, code);
       this.emit('exit', code); // lets main re-apply state the helper owned (taskbar, controller mouse)
       if (this.restarts++ < 5) setTimeout(() => this.start(), 1000 * this.restarts);
-    });
+    };
+    // A start failure reported asynchronously ('error' without 'exit') is handled like an exit.
+    proc.on('error', (e) => { console.error(`[${this.label}] helper failed`, e.message); if (proc.exitCode === null && !proc.pid) onGone(null); });
+    proc.on('exit', (code) => onGone(code));
   }
 
   stop() {

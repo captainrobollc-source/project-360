@@ -12,7 +12,10 @@ import { THEMES, BACKGROUNDS } from '../theme.js';
 
 // ------------------------------------------------------------------ row builders
 function row(k, d, right, cls = '') {
-  return h(`div.row${cls ? '.' + cls : ''}`, { 'data-focus': cls === 'info' ? null : '' }, h('div.txt', {}, h('div.k', {}, k), d ? h('div.d', {}, d) : null), right);
+  const focusable = cls !== 'info';
+  // A stable key per row: a background re-render (Wi-Fi rescan, battery refresh) keeps focus on
+  // the same row instead of whatever lands at the same position.
+  return h(`div.row${cls ? '.' + cls : ''}`, { 'data-focus': focusable ? '' : null, 'data-key': focusable ? `row:${k}` : null }, h('div.txt', {}, h('div.k', {}, k), d ? h('div.d', {}, d) : null), right);
 }
 function toggleRow(k, d, get, setter) {
   const t = h('div.toggle');
@@ -80,8 +83,10 @@ export function systemBlade(ctx) {
   let wifiCache = null;   // { at, data } from the last Wi-Fi scan
   let wifiScanning = false;
   let joining = false; // a Wi-Fi connect is in progress
-  let btConnecting = false; // a Bluetooth connect/disconnect is in progress
+  let btConnecting = null; // { id, on } while a Bluetooth connect/disconnect is in progress
   let btPoll = null; // keeps battery levels fresh while System › Bluetooth is open
+  let bladeActive = false;
+  let updateBusy = false; // an update check/download is running
   let netTest = { running: false, res: null }; // last connection test, kept across re-renders
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
@@ -340,14 +345,13 @@ export function systemBlade(ctx) {
       try { paired = await window.p360.bt.paired(); } catch (e) { rows.push(info('Couldn’t list devices', e.message)); }
       rows.push(h('h3.sec', {}, 'your devices'));
       if (!paired.length) rows.push(info('No devices yet', 'Pick Add a device to pair one.'));
-      const connectTo = async (d, r, on) => {
-        if (btConnecting) return;
-        btConnecting = true;
-        const val = r.querySelector('.val');
-        if (val) val.textContent = on ? 'Connecting…' : 'Disconnecting…';
+      const connectTo = async (d, on) => {
+        if (btConnecting) { ctx.toast({ title: 'One moment', text: 'Another device is still connecting.', sound: 'error' }); return; }
+        btConnecting = { id: d.id, on };
+        split.rerender(); // paints "Connecting…" on its row (and keeps it through re-renders)
         let res;
         try { res = await window.p360.bt.connect(d.id, on); } catch (e) { res = { ok: false, error: e.message }; }
-        btConnecting = false;
+        btConnecting = null;
         if (res.ok) ctx.toast({ title: on ? `${d.name} connected` : `${d.name} disconnected`, sound: on ? 'select' : 'back' });
         else {
           ctx.toast({
@@ -359,20 +363,22 @@ export function systemBlade(ctx) {
       };
       if (!btPoll) {
         btPoll = setInterval(() => {
-          if (split.current() !== 'bluetooth' || document.hidden) { clearInterval(btPoll); btPoll = null; return; }
+          if (split.current() !== 'bluetooth') { clearInterval(btPoll); btPoll = null; return; }
+          if (!bladeActive || document.hidden) return; // another blade, a game or the desktop is in front
           window.p360.bt.paired().catch(() => {}); // a change re-renders through the bt.paired event
         }, 10000);
       }
       for (const d of paired) {
         const batt = headsetBattery(d.battery);
-        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : d.audio ? 'Not connected · A to connect' : 'Not connected'}`, h('div.val', {}, batt || (d.connected ? '●' : '')), d.connected ? 'connected' : '');
+        const busy = btConnecting && btConnecting.id === d.id ? (btConnecting.on ? 'Connecting…' : 'Disconnecting…') : '';
+        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : d.audio ? 'Not connected · A to connect' : 'Not connected'}`, h('div.val', {}, busy || batt || (d.connected ? '●' : '')), d.connected ? 'connected' : '');
         r.dataset.key = `bt:${d.id}`;
         r._activate = async () => {
           const items = [];
           if (d.audio) items.push(d.connected ? { label: 'Disconnect', value: 'disconnect', icon: 'close' } : { label: 'Connect', value: 'connect', icon: 'headset' });
           items.push({ label: 'Remove device', value: 'remove', icon: 'close', danger: true }, { label: 'Cancel', value: null });
           const pick = await menu({ title: d.name, items });
-          if (pick === 'connect' || pick === 'disconnect') { connectTo(d, r, pick === 'connect'); return; }
+          if (pick === 'connect' || pick === 'disconnect') { connectTo(d, pick === 'connect'); return; }
           if (pick !== 'remove') return;
           const ok = await confirm({ title: `Remove ${d.name}?`, text: 'It’s unpaired from this PC. To use it again, pair it with Add a device.', buttons: [{ label: 'Remove', value: true, danger: true }, { label: 'Cancel', value: false }] });
           if (!ok) return;
@@ -424,9 +430,23 @@ export function systemBlade(ctx) {
       }[st.state] || st.state;
       const rows = [
         info('Version', label, `v${st.version || state.version || ''}`),
-        actionRow('Check for updates', st.checkedAt ? `Last checked ${new Date(st.checkedAt).toLocaleString()}` : null, async () => { ctx.toast({ title: 'Checking for updates…', duration: 1800 }); await window.p360.updates.check(); split.rerender(); }),
+        actionRow('Check for updates', st.checkedAt ? `Last checked ${new Date(st.checkedAt).toLocaleString()}` : null, async () => {
+          if (updateBusy || st.state === 'checking' || st.state === 'downloading') return;
+          updateBusy = true;
+          ctx.toast({ title: 'Checking for updates…', duration: 1800 });
+          try { await window.p360.updates.check(); } catch (e) { ctx.toast({ title: 'Couldn’t check for updates', text: e.message, sound: 'error' }); }
+          finally { updateBusy = false; }
+          split.rerender();
+        }),
       ];
-      if (st.state === 'available') rows.push(actionRow('Download update', null, async () => { await window.p360.updates.download(); split.rerender(); }));
+      if (st.state === 'available') rows.push(actionRow('Download update', null, async () => {
+        if (updateBusy) return;
+        updateBusy = true;
+        ctx.toast({ title: `Downloading ${st.available}…`, duration: 2500 });
+        try { await window.p360.updates.download(); } catch (e) { ctx.toast({ title: 'Download failed', text: e.message, sound: 'error' }); }
+        finally { updateBusy = false; }
+        split.rerender();
+      }));
       if (st.state === 'ready') rows.push(actionRow(`Install ${st.available} and restart`, 'A backup is made first. Takes about a minute.', async () => {
         if (await confirm({ title: `Install update ${st.available}?`, text: 'Project 360 restarts when it’s done.', buttons: [{ label: 'Install and restart', value: true }, { label: 'Later', value: false }] })) window.p360.updates.install();
       }));
@@ -502,7 +522,9 @@ export function systemBlade(ctx) {
   });
 
   // Paired devices changed in the background (connected, paired, removed): refresh the list.
-  window.p360.on('radio:event', (ev) => { if (ev.type === 'bt.paired' && split.current() === 'bluetooth') split.rerender(); });
+  window.p360.on('radio:event', (ev) => { if (ev.type === 'bt.paired' && bladeActive && split.current() === 'bluetooth') split.rerender(); });
+  // Update progress (checking, downloading %, ready) arrives as it happens.
+  window.p360.on('update:status', () => { if (bladeActive && split.current() === 'updates') split.rerender(); });
 
   return {
     id: 'system',
@@ -510,7 +532,14 @@ export function systemBlade(ctx) {
     accent: '#aab2ba',
     focus: split.focus,
     mount(content) { content.append(split.root); split.select('console'); },
-    activate() { split.activate(); ctx.setSub(''); },
+    activate() {
+      bladeActive = true;
+      split.activate();
+      ctx.setSub('');
+      const cur = split.current();
+      if (cur === 'bluetooth' || cur === 'updates') split.rerender(); // may have changed while away
+    },
+    deactivate() { bladeActive = false; },
     open(opts) { if (opts.section) split.select(opts.section); },
     refresh(what) {
       const cur = split.current();

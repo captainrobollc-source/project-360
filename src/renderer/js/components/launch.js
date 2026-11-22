@@ -84,6 +84,13 @@ async function offerEmulator(emuId, game) {
   try { st = await window.p360.emu.status(); } catch { /* ignore */ }
   const e = st && st.emulators.find((x) => x.id === emuId);
   if (!e) return toastFn({ title: `Couldn't start ${game.title}`, text: 'Emulator unavailable', sound: 'error' });
+  if (e.progress && ['resolving', 'downloading', 'extracting'].includes(e.progress.phase)) {
+    toastFn({ kind: 'orb', icon: 'folder', title: `${e.name} is still installing`, text: `${game.title} starts when it’s ready`, duration: 4000 });
+    try { await window.p360.emu.install(emuId); } // joins the install already running
+    catch (err) { return toastFn({ title: `Couldn't install ${e.name}`, text: err.message, sound: 'error' }); }
+    inFlight = false;
+    return launchGame(game.id);
+  }
   const { confirm } = await import('./modal.js');
   const ok = await confirm({
     title: `${game.platform || 'This game'} needs ${e.name}`,

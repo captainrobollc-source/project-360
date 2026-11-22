@@ -37,12 +37,13 @@ class Updater extends EventEmitter {
     au.autoInstallOnAppQuit = true;
     au.logger = { info: (m) => console.log('[update]', m), warn: (m) => console.warn('[update]', m), error: (m) => console.error('[update]', m), debug: () => {} };
     this.applyConfig();
-    au.on('checking-for-update', () => this.set({ state: 'checking', error: null }));
+    // A downloaded update stays "ready" whatever a later background check says.
+    au.on('checking-for-update', () => { if (this.status.state !== 'ready') this.set({ state: 'checking', error: null }); });
     au.on('update-not-available', () => this.set({ state: 'current', checkedAt: Date.now() }));
     au.on('update-available', (i) => this.set({ state: au.autoDownload ? 'downloading' : 'available', available: i.version, checkedAt: Date.now() }));
     au.on('download-progress', (p) => this.set({ state: 'downloading', progress: Math.round(p.percent || 0) }));
     au.on('update-downloaded', (i) => { this.set({ state: 'ready', available: i.version, progress: 100 }); this.emit('ready', i.version); });
-    au.on('error', (e) => this.set({ state: 'error', error: String((e && e.message) || e).split('\n')[0] }));
+    au.on('error', (e) => { if (this.status.state !== 'ready') this.set({ state: 'error', error: String((e && e.message) || e).split('\n')[0] }); });
     // Check shortly after start, then every 6 hours.
     setTimeout(() => this.check(true), 60 * 1000);
     this.timer = setInterval(() => this.check(true), 6 * 3600 * 1000);

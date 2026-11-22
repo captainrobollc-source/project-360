@@ -18,6 +18,7 @@ function shade(hex, f) {
 export function mediaBlade(ctx) {
   let lib = null;
   let scanning = null;
+  let lastFolders = JSON.stringify(setting('media.folders') || null);
   const scan = (force = false) => {
     if (scanning) return scanning;
     scanning = window.p360.media.scan(force).then((r) => { lib = r; }).catch(() => { lib = { music: [], pictures: [], videos: [] }; }).finally(() => { scanning = null; split.renderList(); });
@@ -146,7 +147,14 @@ export function mediaBlade(ctx) {
     refresh(what) {
       const cur = split.current();
       if (what === 'media' && cur === 'apps') split.rerender();
-      if (what === 'settings' && setting('media.folders') && lib && !split.inPane()) { /* folders may have changed */ }
+      if (what === 'settings') {
+        // A music/picture/video folder was added or removed: rescan so it shows up.
+        const f = JSON.stringify(setting('media.folders') || null);
+        if (f !== lastFolders) {
+          lastFolders = f;
+          if (lib) scan(true).then(() => { if (split.current() !== 'apps') split.rerender(); });
+        }
+      }
       if (what === 'nowPlaying' && cur === 'music' && split.pane.querySelector('.nowbar') === null && state.nowPlaying) split.rerender();
       if (what === 'nowPlaying' && cur === 'music') {
         const np = state.nowPlaying;
@@ -161,6 +169,7 @@ export function mediaBlade(ctx) {
       const p = [{ btn: 'a', label: 'Open' }];
       if (el && el._item && (setting('media.custom') || []).some((c) => (c.title || c.url) === el._item.title)) p.push({ btn: 'x', label: 'Remove' });
       if (split.current() === 'music') p.push({ btn: 'y', label: 'Play / pause' });
+      else if (split.current() !== 'apps') p.push({ btn: 'y', label: 'Rescan' });
       p.push({ btn: 'b', label: 'Back' });
       return p;
     },

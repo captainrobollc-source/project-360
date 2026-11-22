@@ -52,14 +52,15 @@ export function createToasts(stage, { onIdle } = {}) {
     if (onIdle) onIdle();
   }
 
+  // Keep a history for the Social › Notifications list.
+  const record = (t) => store.set('notifications', [{ ...t, at: Date.now() }, ...(store.state.notifications || [])].slice(0, 60));
   return {
     show(t) {
       if (queue.some((q) => q.title === t.title && q.text === t.text)) return;
-      // Keep a history for the Social › Notifications list.
-      const list = [{ ...t, at: Date.now() }, ...(store.state.notifications || [])].slice(0, 60);
-      store.set('notifications', list);
+      record(t);
       queue.push(t);
       run();
     },
+    record, // toasts that played in the in-game overlay still belong in the dashboard's history
   };
 }

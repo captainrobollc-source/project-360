@@ -116,9 +116,9 @@ async function systemDb(system, cacheDir) {
 }
 
 // CRC32 of a cartridge ROM (raw file ≤ 64 MB, or the first file inside a .zip).
-function romCrc(file) {
+async function romCrc(file) {
   try {
-    const st = fs.statSync(file);
+    const st = await fs.promises.stat(file);
     if (/\.zip$/i.test(file)) {
       const fd = fs.openSync(file, 'r');
       const head = Buffer.alloc(30);
@@ -128,7 +128,7 @@ function romCrc(file) {
       return head.readUInt32LE(14).toString(16).toUpperCase().padStart(8, '0');
     }
     if (st.size > 64 * 1024 * 1024 || typeof zlib.crc32 !== 'function') return null;
-    return (zlib.crc32(fs.readFileSync(file)) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    return (zlib.crc32(await fs.promises.readFile(file)) >>> 0).toString(16).toUpperCase().padStart(8, '0');
   } catch { return null; }
 }
 
@@ -173,7 +173,7 @@ async function retroCandidate(g, cacheDir) {
   try {
     const db = await systemDb(g.libretroSystem, cacheDir);
     rec = (g.romName && db.byName.get(g.romName.toLowerCase())) || null;
-    if (!rec && g.romPath) { const c = romCrc(g.romPath); if (c) rec = db.byCrc.get(c) || null; }
+    if (!rec && g.romPath) { const c = await romCrc(g.romPath); if (c) rec = db.byCrc.get(c) || null; }
     if (!rec) rec = db.byKey.get(key(g.romName || g.title)) || null;
   } catch { /* offline */ }
   const sysName = g.libretroSystem.split(' - ').slice(1).join(' ') || g.platform || '';

@@ -1,12 +1,13 @@
 // Minimal parser for Valve's text KeyValues format (libraryfolders.vdf, appmanifest_*.acf).
 function parseVdf(text) {
+  text = String(text || '').replace(/^\uFEFF/, ''); // Notepad's UTF-8 BOM
   let i = 0;
   const n = text.length;
 
   function skip() {
     while (i < n) {
       const c = text[i];
-      if (c === ' ' || c === '\t' || c === '\r' || c === '\n') { i++; continue; }
+      if (/\s/.test(c)) { i++; continue; } // any whitespace, including non-breaking spaces
       if (c === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; continue; }
       break;
     }
@@ -28,6 +29,7 @@ function parseVdf(text) {
     }
     let out = '';
     while (i < n && !/[\s{}"]/.test(text[i])) out += text[i++];
+    if (!out && i < n && text[i] !== '{' && text[i] !== '}') i++; // always move forward
     return out;
   }
 
@@ -36,7 +38,9 @@ function parseVdf(text) {
     while (true) {
       skip();
       if (i >= n || text[i] === '}') { i++; return o; }
+      const at = i;
       const key = str();
+      if (i === at) { i++; continue; } // stray character: skip it
       skip();
       if (text[i] === '{') { i++; o[key] = obj(); }
       else o[key] = str();

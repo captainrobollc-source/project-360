@@ -43,21 +43,30 @@ namespace P360Radio
                 var p = line.Split('\t');
                 if (p.Length < 2) continue;
                 var id = p[0];
-                Task.Run(async () =>
-                {
-                    try
-                    {
-                        string result = await Dispatch(p);
-                        Emit("{\"id\":" + id + ",\"ok\":true,\"result\":" + result + "}");
-                    }
-                    catch (Exception ex)
-                    {
-                        var e = ex is AggregateException && ex.InnerException != null ? ex.InnerException : ex;
-                        Emit("{\"id\":" + id + ",\"ok\":false,\"error\":" + Json.Str(e.Message) + "}");
-                    }
-                });
+                // Radio on/off, scan start/stop and Wi-Fi connect/disconnect run one after another
+                // in the order they arrived (a quick on→off must end off). Everything else runs at once.
+                if (Serial.Contains(p[1])) { var prev = serialTail; serialTail = Task.Run(() => Run(prev, p, id)); }
+                else Task.Run(() => Run(null, p, id));
             }
             Bt.StopScan();
+        }
+
+        static readonly HashSet<string> Serial = new HashSet<string> { "radio.set", "bt.scan.start", "bt.scan.stop", "wifi.connect", "wifi.disconnect" };
+        static Task serialTail = Task.FromResult(true);
+
+        static async Task Run(Task prev, string[] p, string id)
+        {
+            if (prev != null) { try { await prev; } catch { /* its own reply already went out */ } }
+            try
+            {
+                string result = await Dispatch(p);
+                Emit("{\"id\":" + id + ",\"ok\":true,\"result\":" + result + "}");
+            }
+            catch (Exception ex)
+            {
+                var e = ex is AggregateException && ex.InnerException != null ? ex.InnerException : ex;
+                Emit("{\"id\":" + id + ",\"ok\":false,\"error\":" + Json.Str(e.Message) + "}");
+            }
         }
 
         static string Arg(string[] p, int i) { return i < p.Length ? p[i] : ""; }
@@ -488,8 +497,8 @@ namespace P360Radio
         {
             if (string.IsNullOrEmpty(n)) return null;
             n = n.Trim();
-            var m = System.Text.RegularExpressions.Regex.Match(n, @"^\w[\w ]*\((.+)\)$");
-            if (m.Success) n = m.Groups[1].Value.Trim(); // "Headphones (AirPods Pro)"
+            var m = System.Text.RegularExpressions.Regex.Match(n, @"^(Headphones|Headset|Speakers?|Earphones|Earbuds|Hands-Free|Stereo)\s*\((.+)\)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success) n = m.Groups[2].Value.Trim(); // "Headphones (AirPods Pro)"
             foreach (var s in new[] { " Hands-Free AG Audio", " Hands-Free AG", " Hands-Free", " Stereo", " Avrcp Transport" })
                 if (n.EndsWith(s, StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - s.Length).Trim();
             return n;
@@ -689,7 +698,7 @@ namespace P360Radio
         {
             return "{\"left\":" + Json.Num(a.Left) + ",\"right\":" + Json.Num(a.Right) + ",\"case\":" + Json.Num(a.Case) +
                 ",\"chargingLeft\":" + Json.Bool(a.ChL) + ",\"chargingRight\":" + Json.Bool(a.ChR) + ",\"chargingCase\":" + Json.Bool(a.ChCase) +
-                ",\"rssi\":" + a.Rssi + ",\"age\":" + (Environment.TickCount - a.At) + "}";
+                ",\"rssi\":" + Json.Num(a.Rssi) + ",\"age\":" + Json.Num(Environment.TickCount - a.At) + "}";
         }
 
         public static async Task<string> Read()
@@ -719,13 +728,17 @@ namespace P360Radio
     {
         static WiFiAdapter adapter;
 
+        static bool accessOk;
         static async Task<WiFiAdapter> Adapter()
         {
-            if (adapter != null) return adapter;
-            var access = await W.A(WiFiAdapter.RequestAccessAsync());
-            if (access != WiFiAccessStatus.Allowed) throw new Exception("Windows didn't allow Wi-Fi access (" + access + "). Check Settings › Privacy › Location.");
+            if (!accessOk)
+            {
+                var access = await W.A(WiFiAdapter.RequestAccessAsync());
+                if (access != WiFiAccessStatus.Allowed) throw new Exception("Windows didn't allow Wi-Fi access (" + access + "). Check Settings › Privacy › Location.");
+                accessOk = true;
+            }
             var list = await W.A(WiFiAdapter.FindAllAdaptersAsync());
-            if (list.Count == 0) throw new Exception("No Wi-Fi adapter");
+            if (list.Count == 0) { adapter = null; throw new Exception("No Wi-Fi adapter"); }
             adapter = list[0];
             return adapter;
         }

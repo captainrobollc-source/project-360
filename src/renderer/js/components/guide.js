@@ -9,7 +9,7 @@ import { getRoot, button, confirm, claimLayer, releaseLayer } from './modal.js';
 import { createRing, batteryEl, batteryText } from './ring.js';
 import { coverTile } from './tiles.js';
 import { isRunning as arcadeRunning, quitGame as quitArcade } from '../arcade/engine.js';
-import { lastSlot } from '../input.js';
+import { lastSlot, suppressHeld } from '../input.js';
 import * as music from './music.js';
 
 const ACTIVE = new Set(['launching', 'running', 'untracked']);
@@ -40,6 +40,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
   }
 
   async function open(slot) {
+    suppressHeld();
     const guideSlot = Number.isInteger(slot) ? slot : lastSlot;
     const mineSlot = (state.slots || []).find((x) => x.slot === guideSlot);
     if (cur) return;

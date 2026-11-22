@@ -56,6 +56,8 @@ async function boot() {
 
   input.setHandler((action, info) => {
     if (saver && saver.poke()) return; // input only woke the screen
+    // Home key / a DirectInput pad's Home button: same as the Xbox button, over any dialog.
+    if (action === 'guide' && mode !== 'overlay' && dashboard) { guide.toggle(info && info.slot); return; }
     nav.dispatch(action, info);
   });
 
@@ -68,6 +70,7 @@ async function boot() {
     store.set('slots', d.slots);
   });
   window.p360.on('toast', (t) => toast(t));
+  window.p360.on('toast:record', (t) => toasts.record(t));
   window.p360.on('library:updated', (lib) => store.set('library', lib));
   window.p360.on('pads', (p) => store.set('pads', p));
   window.p360.on('settings:updated', (s) => store.set('settings', s));
@@ -136,7 +139,11 @@ async function boot() {
     document.addEventListener('wheel', () => saver.poke(), { passive: true });
   }
 
-  store.on('settings', (s) => sound.configure({ enabled: s.audio.uiSounds, volume: s.audio.uiVolume }));
+  store.on('settings', (s) => {
+    sound.configure({ enabled: s.audio.uiSounds, volume: s.audio.uiVolume });
+    const want = s.audio.soundPack || 'default';
+    if (want !== sound.currentPack()) sound.loadPack((store.state.soundPacks || []).find((p) => p.name === want) || null);
+  });
 }
 
 boot().catch((e) => {

@@ -129,7 +129,8 @@ const PAGES = {
 };
 
 export function osk({ title = 'Enter text', value = '', placeholder = '', maxLength = 256 }) {
-  return new Promise((resolve) => {
+  let mRef = null;
+  const p = new Promise((resolve) => {
     let text = String(value || '');
     let page = 'lower';
     let releaseKeys = null;
@@ -139,7 +140,7 @@ export function osk({ title = 'Enter text', value = '', placeholder = '', maxLen
       fieldEl.replaceChildren(text ? h('span', {}, text) : h('span.ph', {}, placeholder), h('span.caret'));
       fieldEl.scrollLeft = fieldEl.scrollWidth;
     };
-    const insert = (s) => { if (text.length < maxLength) { text += s; render(); } };
+    const insert = (s) => { if (text.length < maxLength) { text = (text + s).slice(0, maxLength); render(); } };
     const backspace = () => { text = text.slice(0, -1); render(); };
 
     const buildKeys = () => {
@@ -174,7 +175,8 @@ export function osk({ title = 'Enter text', value = '', placeholder = '', maxLen
         { btn: 'a', label: 'Type' }, { btn: 'x', label: 'Backspace' }, { btn: 'y', label: 'Space' },
         { btn: 'lt', label: 'Shift' }, { btn: 'start', label: 'Done' }, { btn: 'b', label: 'Cancel', side: 'right' },
       ],
-      handle(action) {
+      handle(action, info) {
+        if ((action === 'lt' || action === 'rt') && info && info.repeat) return true; // held: toggle once
         if (action === 'x') { backspace(); sound.play('tick'); return true; }
         if (action === 'y') { insert(' '); sound.play('tick'); return true; }
         if (action === 'lt') { page = page === 'upper' ? 'lower' : 'upper'; buildKeys(); return true; }
@@ -196,6 +198,7 @@ export function osk({ title = 'Enter text', value = '', placeholder = '', maxLen
       },
     });
 
+    mRef = m;
     releaseKeys = captureKeys((e) => {
       if (nav.top() !== m.layer) return false; // something (the Guide) is on top of it
       if (e.key === 'Enter') { m.close(text); return true; }
@@ -209,4 +212,6 @@ export function osk({ title = 'Enter text', value = '', placeholder = '', maxLen
       return false;
     });
   });
+  p.close = (v = null) => { if (mRef) mRef.close(v); };
+  return p;
 }

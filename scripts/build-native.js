@@ -43,6 +43,8 @@ function buildOne(t, { force, quiet }) {
   const missing = t.refs.filter((r) => !fs.existsSync(r));
   if (missing.length) throw new Error(`${t.name}: missing ${missing.join(', ')}`);
   fs.mkdirSync(outDir, { recursive: true });
+  // A failed compile must not leave the previous exe behind to be packaged as if it were current.
+  try { fs.unlinkSync(out); } catch (e) { if (e.code !== 'ENOENT') throw new Error(`${t.name}: ${path.basename(out)} is in use (close Project 360 first)`); }
   const args = ['/nologo', '/optimize+', '/target:exe', '/platform:anycpu', `/out:${out}`, ...t.refs.map((r) => `/r:${r}`), src];
   try {
     execFileSync(csc, args, { stdio: quiet ? 'pipe' : 'inherit', windowsHide: true });

@@ -146,6 +146,7 @@ let overlay = null;
 let curtain = null; // black window at the bottom of the z-order: hides the desktop during games
 let overlayGuideOpen = false;
 let overlayToasts = false;
+let appQuitting = false;
 let suspended = false;
 let signedIn = false;
 let signedInBefore = false;
@@ -203,7 +204,8 @@ function createOverlay() {
   overlay.setAlwaysOnTop(true, 'screen-saver');
   overlay.setIgnoreMouseEvents(true);
   overlay.loadFile(INDEX, { query: { mode: 'overlay' } });
-  overlay.on('closed', () => { overlay = null; });
+  overlay.on('close', (e) => { if (!appQuitting) e.preventDefault(); }); // Alt+F4 while the Guide has focus
+  overlay.on('closed', () => { overlay = null; overlayReady = false; });
 }
 
 function createCurtain() {
@@ -261,13 +263,27 @@ async function restoreDashboard() {
 }
 
 // ------------------------------------------------------------------ toasts + guide
+let overlayReady = false; // the overlay page is listening (set shortly after its app:init)
+const overlayQueue = [];
+let overlayToastTimer = null;
 function toast(t) {
   const payload = { id: Date.now() + Math.random(), ...t };
   if (mainVisible() && !overlayGuideOpen) return send(main, 'toast', payload);
   if (!overlay) return;
+  if (!overlayReady) { overlayQueue.push(payload); return; } // shown once the overlay page is up
+  showOverlayToast(payload);
+}
+function showOverlayToast(payload) {
   overlayToasts = true;
   if (!overlay.isVisible()) overlay.showInactive();
   send(overlay, 'toast', payload);
+  if (main) send(main, 'toast:record', payload); // Social › Notifications lives in the dashboard
+  // If the overlay never reports its toasts finished (it reloaded, a message got lost), don't
+  // leave a full-screen always-on-top window up.
+  clearTimeout(overlayToastTimer);
+  overlayToastTimer = setTimeout(() => {
+    if (overlayToasts && !overlayGuideOpen && overlay) { overlayToasts = false; overlay.hide(); }
+  }, 30000);
 }
 
 async function openOverlayGuide(slot) {
@@ -340,7 +356,11 @@ native.on('in', ({ s, b }) => {
   }
   if (signInWin) return; // controller mouse is driving the sign-in window
   const target = inputTarget();
-  if (target) return send(target, 'pad', { s, b });
+  if (target) {
+    const th = launcher.current && launcher.current.handle;
+    if (th && th.pad) th.pad(0); // the Guide/dashboard took over: let go of anything held in the TV app
+    return send(target, 'pad', { s, b });
+  }
   // Built-in TV apps get the pad as key presses.
   const h = launcher.current && launcher.current.handle;
   if (h && h.pad) h.pad(b & ~(1 << 10));
@@ -389,6 +409,9 @@ native.on('exit', () => {
 });
 native.on('ready', (info) => {
   native.call('pad.battery').catch(() => {});
+  // Whatever the old helper had applied is gone (or never applied if a call failed): re-send.
+  taskbarHidden = null;
+  emuOn = null;
   applyTaskbar();
   updateEmu();
   broadcast('native:ready', info);
@@ -516,17 +539,20 @@ function soundPacks() {
 
 // ------------------------------------------------------------------ local media
 let mediaCache = null;
+let mediaGen = 0; // bumped when the cache is cleared (folders changed)
 async function scanMedia(force = false) {
   const lm = svc('localmedia');
   if (!lm) return { music: [], pictures: [], videos: [], roots: [] };
   if (mediaCache && !force) return mediaCache;
+  const gen = mediaGen;
   const root = await findSteamRoot();
-  mediaCache = await lm.scanAll({
+  const result = await lm.scanAll({
     extraFolders: settings.get('media.folders') || {},
     steamRoot: root,
     gameNameForAppId: (appid) => { const g = library.game(`steam:${appid}`); return g ? g.title : null; },
   });
-  return mediaCache;
+  if (gen === mediaGen) mediaCache = result;
+  return result;
 }
 const b64url = (s) => Buffer.from(s, 'utf8').toString('base64url');
 const unb64url = (s) => Buffer.from(s, 'base64url').toString('utf8');
@@ -591,7 +617,17 @@ function handle(ch, fn) {
   });
 }
 
-handle('app:init', (e, mode) => initPayload(mode));
+handle('app:init', (e, mode) => {
+  if (mode === 'overlay') {
+    // Its toast listener is added right after init resolves.
+    setTimeout(() => {
+      overlayReady = true;
+      const queued = overlayQueue.splice(0);
+      for (const p of queued) { if (mainVisible() && !overlayGuideOpen) send(main, 'toast', p); else if (overlay) showOverlayToast(p); }
+    }, 400);
+  }
+  return initPayload(mode);
+});
 handle('library:get', () => library.view());
 handle('library:rescan', async () => maybeRescan(true));
 // ---- Built-in arcade (the games run inside the dashboard renderer)
@@ -641,7 +677,10 @@ handle('media:launch', async (e, id) => {
   achievements.track('media');
   return launcher.launch(m, 'media');
 });
-handle('web:open', async (e, item) => launchWeb(item));
+handle('web:open', async (e, item) => {
+  if (NO_LAUNCH) throw new Error('Launching is disabled in scripted test runs');
+  return launchWeb(item);
+});
 handle('game:update', (e, id, patch) => {
   const allowed = {};
   if ('favorite' in patch) allowed.favorite = !!patch.favorite;
@@ -682,7 +721,7 @@ handle('settings:set', async (e, key, value) => {
   if (key.startsWith('theme.')) achievements.track('theme');
   if (key.startsWith('library.')) maybeRescan(true);
   if (key.startsWith('art.')) art.fetchMissing();
-  if (key.startsWith('media.')) { if (key.startsWith('media.folders')) mediaCache = null; broadcast('media:updated', media.list(settings, USER)); }
+  if (key.startsWith('media.')) { if (key.startsWith('media.folders')) { mediaCache = null; mediaGen++; } broadcast('media:updated', media.list(settings, USER)); }
   broadcast('settings:updated', settingsView());
   return settingsView();
 });
@@ -895,14 +934,24 @@ handle('dialog:addFolder', async (e, kind = 'games') => {
     folders[kind] = [...new Set([...(folders[kind] || []), r.filePaths[0]])];
     settings.set('media.folders', folders);
     mediaCache = null;
+    mediaGen++;
   }
   broadcast('settings:updated', settingsView());
   return r.filePaths[0];
 });
 
-handle('app:quit', () => { app.exit(0); });
+// app.exit() skips 'will-quit': save everything first (settings saves are debounced by 400 ms).
+function flushAll() {
+  let ok = true;
+  for (const st of [settings, library.lib, library.user, emulation.state, stores.state]) {
+    try { if (st && st.flush && st.flush() === false && !st.frozen) ok = false; } catch { ok = false; }
+  }
+  return ok;
+}
+handle('app:quit', () => { flushAll(); app.exit(0); });
 const relaunchArgs = () => ({ args: process.argv.slice(1).filter((a) => a !== '--recovered') });
 function relaunchApp() {
+  flushAll();
   if (updater.status && updater.status.state === 'ready') { try { updater.install(); return; } catch { /* fall back */ } }
   if (AS_SHELL) { app.exit(65); return; }
   // Otherwise a downloaded-but-not-ready installer could run on quit and kill the new instance.
@@ -1023,11 +1072,11 @@ handle('emu:movePlan', async () => {
 });
 handle('emu:move', async (e, drive) => {
   try {
-    const cur = launcher.current;
-    if (cur && cur.item && cur.item.systemId) throw new Error(`Close ${cur.item.title} first`);
     const si = svc('sysinfo');
     let info = null;
     try { info = si && (await si.moveDrives()).find((d) => d.drive === String(drive || '').slice(0, 2).toUpperCase()); } catch { /* unknown format */ }
+    const cur = launcher.current;
+    if (cur && cur.item && cur.item.systemId) throw new Error(`Close ${cur.item.title} first`);
     const res = await emulation.move(drive, {
       maxFile: info && /^fat(32)?$/i.test(info.format || '') ? 4294967295 : 0,
       // A library scan that started before the switch would write the old ids back: wait it out.
@@ -1219,7 +1268,8 @@ app.whenReady().then(() => {
   updater.on('installing', () => { try { backups.create('update'); } catch { /* ignore */ } });
   updater.init();
   // Shutdown/restart from the Guide: save and mark a clean exit (will-quit may never come).
-  system.onPowerOff(() => { try { settings.flush(); library.flush(); } catch { /* ignore */ } reliability.markExit(); });
+  system.onPowerOff(() => { flushAll(); reliability.markPowerOff(); });
+  system.onExit(() => flushAll());
   // Waking from sleep: beat at once so the watchdog sees a live dashboard.
   try { require('electron').powerMonitor.on('resume', () => reliability.beat()); } catch { /* ignore */ }
   // Warm up the Bluetooth/Wi-Fi helper so System › Bluetooth opens instantly.
@@ -1237,10 +1287,11 @@ app.whenReady().then(() => {
 });
 
 app.on('second-instance', () => { if (main) restoreDashboard(); });
+app.on('before-quit', () => { appQuitting = true; });
 app.on('will-quit', () => {
+  appQuitting = true;
   globalShortcut.unregisterAll();
-  library.flush();
-  settings.flush();
+  flushAll();
   if (emuOn) native.call('emu.off').catch(() => {});
   if (taskbarHidden) native.call('taskbar.show').catch(() => {});
   native.stop();

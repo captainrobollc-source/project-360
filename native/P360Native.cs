@@ -58,16 +58,24 @@ namespace P360
                 }
             }
             // Parent went away (quit or crash): never leave the taskbar hidden or keys held.
-            Taskbar.Show();
-            Emu.Deactivate();
+            Cleanup();
             Environment.Exit(0);
+        }
+
+        static int cleaned = 0;
+        static void Cleanup()
+        {
+            if (Interlocked.Exchange(ref cleaned, 1) == 1) return;
+            try { Taskbar.Show(); } catch { }
+            try { Emu.Deactivate(); } catch { }
         }
 
         public static void Emit(string json)
         {
             lock (OutLock)
             {
-                try { Out.WriteLine(json); } catch { Environment.Exit(0); }
+                try { Out.WriteLine(json); }
+                catch { Cleanup(); Environment.Exit(0); } // stdout broken: Electron is gone
             }
         }
 
@@ -306,7 +314,7 @@ namespace P360
                         {
                             connected[s] = now;
                             Program.Emit("{\"ev\":\"pad\",\"s\":" + s + ",\"c\":" + Json.Bool(now) + "}");
-                            if (!now) { masks[s] = 0; Program.Emit("{\"ev\":\"in\",\"s\":" + s + ",\"b\":0}"); lastBat[s] = -1; }
+                            if (!now) { masks[s] = 0; Program.Emit("{\"ev\":\"in\",\"s\":" + s + ",\"b\":0}"); lastBat[s] = -1; if (Emu.Active) Emu.Process(s, default(XINPUT_GAMEPAD)); }
                             else nextBat = 0;
                         }
                         if (!now) continue;
@@ -410,11 +418,12 @@ namespace P360
     {
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
-        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
+        [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd, int cmd);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
 
         static volatile bool hidden = false;
         static Thread keeper;
+        static readonly object gate = new object();
 
         static List<IntPtr> Bars()
         {
@@ -435,27 +444,36 @@ namespace P360
 
         public static void Hide()
         {
-            hidden = true;
-            foreach (var w in Bars()) ShowWindow(w, 0);
-            if (keeper != null) return;
-            keeper = new Thread(delegate ()
+            lock (gate)
             {
-                while (true)
+                hidden = true;
+                foreach (var w in Bars()) ShowWindowAsync(w, 0);
+                if (keeper != null) return;
+                keeper = new Thread(delegate ()
                 {
-                    Thread.Sleep(1200);
-                    if (!hidden) continue;
-                    foreach (var w in Bars()) if (IsWindowVisible(w)) ShowWindow(w, 0);
-                }
-            });
-            keeper.IsBackground = true;
-            keeper.Start();
+                    while (true)
+                    {
+                        Thread.Sleep(1200);
+                        lock (gate)
+                        {
+                            if (!hidden) continue;
+                            foreach (var w in Bars()) if (IsWindowVisible(w)) ShowWindowAsync(w, 0);
+                        }
+                    }
+                });
+                keeper.IsBackground = true;
+                keeper.Start();
+            }
         }
 
         public static void Show()
         {
-            if (!hidden) return;
-            hidden = false;
-            foreach (var w in Bars()) ShowWindow(w, 5 /*SW_SHOW*/);
+            lock (gate)
+            {
+                if (!hidden) return;
+                hidden = false;
+                foreach (var w in Bars()) ShowWindowAsync(w, 5 /*SW_SHOW*/);
+            }
         }
     }
 
@@ -909,10 +927,14 @@ namespace P360
 
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
 
+        [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr hwnd);
+
         public static bool ForceForeground(IntPtr hwnd)
         {
             if (hwnd == IntPtr.Zero) return false;
-            if (IsIconic(hwnd)) ShowWindow(hwnd, 9 /*SW_RESTORE*/);
+            // A hung window would block these calls (and every later command) until it recovers.
+            if (IsHungAppWindow(hwnd)) { ShowWindowAsync(hwnd, 9); return false; }
+            if (IsIconic(hwnd)) ShowWindowAsync(hwnd, 9 /*SW_RESTORE*/);
             if (GetForegroundWindow() == hwnd) return true;
 
             uint dummy;
