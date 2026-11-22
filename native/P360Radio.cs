@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -71,6 +72,8 @@ namespace P360Radio
                 case "bt.pair": return await Bt.Pair(Arg(p, 2));
                 case "bt.reply": Bt.Reply(Arg(p, 2), Arg(p, 3) == "1", Arg(p, 4)); return "true";
                 case "bt.unpair": return await Bt.Unpair(Arg(p, 2));
+                case "bt.audio.list": return BtAudio.List();
+                case "bt.audio.connect": return BtAudio.Connect(Arg(p, 2), Arg(p, 3), Arg(p, 4) != "0");
                 case "wifi.scan": return await Wifi.Scan(true);
                 case "wifi.status": return await Wifi.Scan(false);
                 case "wifi.connect": return await Wifi.Connect(Arg(p, 2), Arg(p, 3), Arg(p, 4) != "0");
@@ -361,6 +364,222 @@ namespace P360Radio
             var r = await W.A(d.Pairing.UnpairAsync());
             bool ok = r.Status == DeviceUnpairingResultStatus.Unpaired || r.Status == DeviceUnpairingResultStatus.AlreadyUnpaired;
             return "{\"status\":" + Json.Str(r.Status.ToString()) + ",\"ok\":" + Json.Bool(ok) + "}";
+        }
+    }
+
+    // ---- Bluetooth audio: connect / disconnect paired headphones and speakers.
+    // Windows only reconnects audio devices when they ask (AirPods busy with a phone never do).
+    // Settings' "Connect" button sends a one-shot reconnect (KSPROPSETID_BtAudio) to the device's
+    // Bluetooth audio driver; this does the same. Each device's audio endpoints (Stereo and
+    // Hands-Free) lead to its driver filters through the endpoint's device topology.
+    static class BtAudio
+    {
+        [StructLayout(LayoutKind.Sequential)] struct PROPERTYKEY { public Guid fmtid; public int pid; }
+        [StructLayout(LayoutKind.Explicit, Size = 24)] struct PROPVARIANT { [FieldOffset(0)] public short vt; [FieldOffset(8)] public IntPtr p; }
+        [StructLayout(LayoutKind.Sequential)] struct KSPROPERTY { public Guid Set; public int Id; public int Flags; }
+
+        [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDeviceEnumerator
+        {
+            [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IMMDeviceCollection devices);
+            [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice device);
+            [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+        }
+
+        [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDeviceCollection
+        {
+            [PreserveSig] int GetCount(out int count);
+            [PreserveSig] int Item(int index, out IMMDevice device);
+        }
+
+        [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDevice
+        {
+            [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+            [PreserveSig] int OpenPropertyStore(int access, out IPropertyStore store);
+            [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+            [PreserveSig] int GetState(out int state);
+        }
+
+        [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IPropertyStore
+        {
+            [PreserveSig] int GetCount(out int count);
+            [PreserveSig] int GetAt(int index, out PROPERTYKEY key);
+            [PreserveSig] int GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+        }
+
+        [ComImport, Guid("2A07407E-6497-4A18-9787-32F79BD0D98F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IDeviceTopology
+        {
+            [PreserveSig] int GetConnectorCount(out int count);
+            [PreserveSig] int GetConnector(int index, out IConnector connector);
+        }
+
+        [ComImport, Guid("9c2c4058-23f5-41de-877a-df3af236a09e"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IConnector
+        {
+            [PreserveSig] int GetConnectorType(out int type);
+            [PreserveSig] int GetDataFlow(out int flow);
+            [PreserveSig] int ConnectTo(IntPtr to);
+            [PreserveSig] int Disconnect();
+            [PreserveSig] int IsConnected(out int connected);
+            [PreserveSig] int GetConnectedTo(out IntPtr to);
+            [PreserveSig] int GetConnectorIdConnectedTo([MarshalAs(UnmanagedType.LPWStr)] out string id);
+            [PreserveSig] int GetDeviceIdConnectedTo([MarshalAs(UnmanagedType.LPWStr)] out string id);
+        }
+
+        [ComImport, Guid("28F54685-06FD-11D2-B27A-00A0C9223196"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IKsControl
+        {
+            [PreserveSig] int KsProperty(ref KSPROPERTY prop, int propLength, IntPtr data, int dataLength, out int returned);
+        }
+
+        [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT pv);
+
+        static readonly Guid CLSID_MMDeviceEnumerator = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+        static readonly Guid IID_IDeviceTopology = new Guid("2A07407E-6497-4A18-9787-32F79BD0D98F");
+        static readonly Guid IID_IKsControl = new Guid("28F54685-06FD-11D2-B27A-00A0C9223196");
+        static readonly Guid KSPROPSETID_BtAudio = new Guid("7FA06C40-B8F6-4C7E-8556-E8C33A12E54D");
+        const int KSPROPERTY_ONESHOT_RECONNECT = 0, KSPROPERTY_ONESHOT_DISCONNECT = 1, KSPROPERTY_TYPE_GET = 1;
+        const int CLSCTX_ALL = 23, DEVICE_STATE_ACTIVE = 1, DEVICE_STATEMASK_ALL = 15;
+
+        static PROPERTYKEY Key(string g, int pid) { var k = new PROPERTYKEY(); k.fmtid = new Guid(g); k.pid = pid; return k; }
+        static readonly PROPERTYKEY PKEY_Device_FriendlyName = Key("a45c254e-df1c-4efd-8020-67d146a850e0", 14);
+        static readonly PROPERTYKEY PKEY_DeviceInterface_FriendlyName = Key("026e516e-b814-414b-83cd-856d6fef4822", 2);
+        static readonly PROPERTYKEY PKEY_Device_ContainerId = Key("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c", 2);
+
+        class Group { public string Container, Mac, Name; public bool Connected; public List<string> Filters = new List<string>(); }
+
+        static string StrProp(IPropertyStore st, PROPERTYKEY k)
+        {
+            PROPVARIANT pv;
+            if (st.GetValue(ref k, out pv) != 0) return null;
+            try { return pv.vt == 31 && pv.p != IntPtr.Zero ? Marshal.PtrToStringUni(pv.p) : null; }
+            finally { PropVariantClear(ref pv); }
+        }
+
+        static string GuidProp(IPropertyStore st, PROPERTYKEY k)
+        {
+            PROPVARIANT pv;
+            if (st.GetValue(ref k, out pv) != 0) return null;
+            try { return pv.vt == 72 && pv.p != IntPtr.Zero ? ((Guid)Marshal.PtrToStructure(pv.p, typeof(Guid))).ToString("D") : null; }
+            finally { PropVariantClear(ref pv); }
+        }
+
+        // "AirPods Pro Hands-Free" / "AirPods Pro Stereo" → "AirPods Pro"
+        static string CleanName(string n)
+        {
+            if (string.IsNullOrEmpty(n)) return null;
+            n = n.Trim();
+            var m = System.Text.RegularExpressions.Regex.Match(n, @"^\w[\w ]*\((.+)\)$");
+            if (m.Success) n = m.Groups[1].Value.Trim(); // "Headphones (AirPods Pro)"
+            foreach (var s in new[] { " Hands-Free AG Audio", " Hands-Free AG", " Hands-Free", " Stereo", " Avrcp Transport" })
+                if (n.EndsWith(s, StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - s.Length).Trim();
+            return n;
+        }
+
+        // Classic Bluetooth audio filters carry the device address: ...&0&A1B2C3D4E5F6_C00000000#...
+        static string MacOf(string filterId)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(filterId ?? "", @"[&#]([0-9a-fA-F]{12})_[cC][0-9a-fA-F]+");
+            if (!m.Success) return null;
+            string h = m.Groups[1].Value.ToLowerInvariant();
+            return string.Join(":", Enumerable.Range(0, 6).Select(i => h.Substring(i * 2, 2)));
+        }
+
+        static IMMDeviceEnumerator Enumerator() { return (IMMDeviceEnumerator)Activator.CreateInstance(Type.GetTypeFromCLSID(CLSID_MMDeviceEnumerator)); }
+
+        static List<Group> Groups(IMMDeviceEnumerator en)
+        {
+            var byKey = new Dictionary<string, Group>();
+            IMMDeviceCollection col;
+            if (en.EnumAudioEndpoints(2 /*eAll*/, DEVICE_STATEMASK_ALL, out col) != 0) return new List<Group>();
+            int count; col.GetCount(out count);
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    IMMDevice ep;
+                    if (col.Item(i, out ep) != 0) continue;
+                    Guid iid = IID_IDeviceTopology;
+                    object o;
+                    if (ep.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o) != 0) continue;
+                    var topo = (IDeviceTopology)o;
+                    IConnector conn;
+                    if (topo.GetConnector(0, out conn) != 0) continue;
+                    string filter;
+                    if (conn.GetDeviceIdConnectedTo(out filter) != 0 || filter == null) continue;
+                    string lower = filter.ToLowerInvariant();
+                    if (!lower.Contains("bthenum") && !lower.Contains("bthhfenum") && !lower.Contains("bthleenum")) continue;
+                    int state; ep.GetState(out state);
+                    string container = null, name = null;
+                    IPropertyStore st;
+                    if (ep.OpenPropertyStore(0, out st) == 0)
+                    {
+                        container = GuidProp(st, PKEY_Device_ContainerId);
+                        name = CleanName(StrProp(st, PKEY_DeviceInterface_FriendlyName)) ?? CleanName(StrProp(st, PKEY_Device_FriendlyName));
+                    }
+                    string mac = MacOf(filter);
+                    string key = container ?? mac ?? (name ?? filter).ToLowerInvariant();
+                    Group g;
+                    if (!byKey.TryGetValue(key, out g)) { g = new Group { Container = container }; byKey[key] = g; }
+                    if (g.Mac == null) g.Mac = mac;
+                    if (g.Name == null || (name != null && name.Length < g.Name.Length)) g.Name = name ?? g.Name;
+                    if (state == DEVICE_STATE_ACTIVE) g.Connected = true;
+                    if (!g.Filters.Contains(filter)) g.Filters.Add(filter);
+                }
+                catch { /* an endpoint that can't be inspected */ }
+            }
+            return byKey.Values.ToList();
+        }
+
+        static string GroupJson(Group g)
+        {
+            return "{\"container\":" + Json.Str(g.Container) + ",\"mac\":" + Json.Str(g.Mac) + ",\"name\":" + Json.Str(g.Name) +
+                ",\"connected\":" + Json.Bool(g.Connected) + ",\"filters\":" + g.Filters.Count + "}";
+        }
+
+        public static string List()
+        {
+            return "[" + string.Join(",", Groups(Enumerator()).Select(GroupJson)) + "]";
+        }
+
+        // Finds the device by Bluetooth address (or by name when the address isn't in the driver's
+        // id) and asks each of its audio drivers to connect or disconnect.
+        public static string Connect(string mac, string name, bool on)
+        {
+            var en = Enumerator();
+            var groups = Groups(en);
+            string m = (mac ?? "").ToLowerInvariant();
+            string n = CleanName(name);
+            var g = groups.FirstOrDefault(x => m != "" && x.Mac == m)
+                ?? groups.FirstOrDefault(x => n != null && string.Equals(x.Name, n, StringComparison.OrdinalIgnoreCase));
+            if (g == null) return "{\"found\":false,\"sent\":0}";
+            int sent = 0;
+            var errors = new List<string>();
+            foreach (var filter in g.Filters)
+            {
+                try
+                {
+                    IMMDevice dev;
+                    int hr = en.GetDevice(filter, out dev);
+                    if (hr != 0) { errors.Add("device 0x" + hr.ToString("x8")); continue; }
+                    Guid iid = IID_IKsControl;
+                    object o;
+                    hr = dev.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o);
+                    if (hr != 0) { errors.Add("control 0x" + hr.ToString("x8")); continue; }
+                    var ks = (IKsControl)o;
+                    var prop = new KSPROPERTY { Set = KSPROPSETID_BtAudio, Id = on ? KSPROPERTY_ONESHOT_RECONNECT : KSPROPERTY_ONESHOT_DISCONNECT, Flags = KSPROPERTY_TYPE_GET };
+                    int ret;
+                    hr = ks.KsProperty(ref prop, Marshal.SizeOf(typeof(KSPROPERTY)), IntPtr.Zero, 0, out ret);
+                    if (hr == 0) sent++; else errors.Add("request 0x" + hr.ToString("x8"));
+                }
+                catch (Exception e) { errors.Add(e.Message); }
+            }
+            return "{\"found\":true,\"sent\":" + sent + ",\"filters\":" + g.Filters.Count + ",\"connected\":" + Json.Bool(g.Connected) +
+                ",\"errors\":[" + string.Join(",", errors.Select(Json.Str)) + "]}";
         }
     }
 

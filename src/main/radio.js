@@ -52,6 +52,17 @@ function onFound({ dev }) {
   events.emit('event', { type: 'bt.found', dev: { ...dev, kind: kindOf(dev) } });
 }
 
+// Bluetooth audio devices Windows knows (headphones, speakers), matched to paired devices by
+// address, or by name when the driver doesn't carry the address.
+async function audioList() {
+  try { return await helper.callT(8000, 'bt.audio.list'); } catch { return []; }
+}
+function audioFor(d, audio) {
+  const mac = macOf(d.id);
+  return audio.find((a) => mac && a.mac === mac) || audio.find((a) => a.name && nameKey(a.name) === nameKey(d.name)) || null;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Cached answers so System › Bluetooth / Network open instantly; a background refresh follows.
 const cache = { radios: null, radiosAt: 0, paired: null, pairedAt: 0 };
 let pairedInflight = null;
@@ -59,8 +70,13 @@ async function fetchPaired() {
   if (pairedInflight) return pairedInflight;
   pairedInflight = (async () => {
     await ensure();
-    const list = (await helper.callT(10000, 'bt.paired'))
-      .map((d) => ({ ...d, kind: kindOf(d) }))
+    const [raw, audio] = await Promise.all([helper.callT(10000, 'bt.paired'), audioList()]);
+    const list = raw
+      .map((d) => {
+        const a = audioFor(d, audio);
+        // Headphones and speakers can be connected by hand (like Windows' Connect button).
+        return { ...d, kind: kindOf(d), audio: !!a, connected: d.connected || !!(a && a.connected) };
+      })
       .sort((a, b) => (b.connected - a.connected) || a.name.localeCompare(b.name));
     const changed = JSON.stringify(list) !== JSON.stringify(cache.paired);
     cache.paired = list;
@@ -154,6 +170,26 @@ const api = {
     const res = await helper.callT(120000, 'bt.pair', id);
     if (res && res.paired) fetchPaired().catch(() => {});
     return res;
+  },
+  // Connect (or disconnect) paired headphones/speakers now, e.g. AirPods that are busy with a
+  // phone. Resolves once Windows reports the new state, or after ~15 s.
+  async audioConnect(id, on = true) {
+    await ensure();
+    let d = (cache.paired || []).find((x) => x.id === id);
+    if (!d) d = (await fetchPaired()).find((x) => x.id === id);
+    if (!d) throw new Error('That device isn’t paired any more');
+    const res = await helper.callT(20000, 'bt.audio.connect', macOf(d.id) || '', d.name, on ? '1' : '0');
+    if (!res.found) throw new Error('Only headphones and speakers can be connected from here. Other devices connect when you turn them on.');
+    if (!res.sent) throw new Error(`Windows didn’t accept the request${res.errors && res.errors.length ? ` (${res.errors[0]})` : ''}`);
+    let state = null;
+    for (let i = 0; i < 15; i++) {
+      await sleep(1000);
+      const a = audioFor(d, await audioList());
+      state = a ? a.connected : null;
+      if (state === on) break;
+    }
+    fetchPaired().catch(() => {});
+    return { ok: state === on, connected: !!state };
   },
   async reply(id, accept, pin = '') { await ensure(); return helper.call('bt.reply', id, accept ? '1' : '0', pin); },
   async unpair(id) {

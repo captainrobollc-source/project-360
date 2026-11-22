@@ -800,6 +800,7 @@ handle('bt:scan', (e, on) => radio.scan(on));
 handle('bt:pair', (e, id) => radio.pair(id));
 handle('bt:reply', (e, id, accept, pin) => radio.reply(id, accept, pin));
 handle('bt:unpair', (e, id) => radio.unpair(id));
+handle('bt:connect', (e, id, on) => radio.audioConnect(id, on !== false));
 handle('wifi:list', (e, rescan) => radio.wifi(rescan !== false));
 handle('wifi:connect', (e, ssid, password, auto) => radio.connect(ssid, password, auto));
 handle('wifi:disconnect', () => radio.disconnect());

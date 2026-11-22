@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld('p360', {
     pair: (id) => call('bt:pair', id),
     reply: (id, accept, pin) => call('bt:reply', id, accept, pin),
     unpair: (id) => call('bt:unpair', id),
+    connect: (id, on = true) => call('bt:connect', id, on),
   },
   wifi: {
     list: (rescan) => call('wifi:list', rescan),

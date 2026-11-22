@@ -66,6 +66,7 @@ export function systemBlade(ctx) {
   let wifiCache = null;   // { at, data } from the last Wi-Fi scan
   let wifiScanning = false;
   let joining = false; // a Wi-Fi connect is in progress
+  let btConnecting = false; // a Bluetooth connect/disconnect is in progress
   let netTest = { running: false, res: null }; // last connection test, kept across re-renders
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
@@ -324,11 +325,32 @@ export function systemBlade(ctx) {
       try { paired = await window.p360.bt.paired(); } catch (e) { rows.push(info('Couldn’t list devices', e.message)); }
       rows.push(h('h3.sec', {}, 'your devices'));
       if (!paired.length) rows.push(info('No devices yet', 'Pick Add a device to pair one.'));
+      const connectTo = async (d, r, on) => {
+        if (btConnecting) return;
+        btConnecting = true;
+        const val = r.querySelector('.val');
+        if (val) val.textContent = on ? 'Connecting…' : 'Disconnecting…';
+        let res;
+        try { res = await window.p360.bt.connect(d.id, on); } catch (e) { res = { ok: false, error: e.message }; }
+        btConnecting = false;
+        if (res.ok) ctx.toast({ title: on ? `${d.name} connected` : `${d.name} disconnected`, sound: on ? 'select' : 'back' });
+        else {
+          ctx.toast({
+            title: on ? `Couldn’t connect ${d.name}` : `Couldn’t disconnect ${d.name}`, sound: 'error',
+            text: res.error || (on ? 'Make sure it’s on and close by. AirPods: take them out of the case.' : 'Try again in a moment.'),
+          });
+        }
+        split.rerender();
+      };
       for (const d of paired) {
-        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : 'Not connected'}`, h('div.val', {}, d.connected ? '●' : ''), d.connected ? 'connected' : '');
+        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : d.audio ? 'Not connected · A to connect' : 'Not connected'}`, h('div.val', {}, d.connected ? '●' : ''), d.connected ? 'connected' : '');
         r.dataset.key = `bt:${d.id}`;
         r._activate = async () => {
-          const pick = await menu({ title: d.name, items: [{ label: 'Remove device', value: 'remove', icon: 'close', danger: true }, { label: 'Cancel', value: null }] });
+          const items = [];
+          if (d.audio) items.push(d.connected ? { label: 'Disconnect', value: 'disconnect', icon: 'close' } : { label: 'Connect', value: 'connect', icon: 'headset' });
+          items.push({ label: 'Remove device', value: 'remove', icon: 'close', danger: true }, { label: 'Cancel', value: null });
+          const pick = await menu({ title: d.name, items });
+          if (pick === 'connect' || pick === 'disconnect') { connectTo(d, r, pick === 'connect'); return; }
           if (pick !== 'remove') return;
           const ok = await confirm({ title: `Remove ${d.name}?`, text: 'It’s unpaired from this PC. To use it again, pair it with Add a device.', buttons: [{ label: 'Remove', value: true, danger: true }, { label: 'Cancel', value: false }] });
           if (!ok) return;
@@ -339,7 +361,7 @@ export function systemBlade(ctx) {
         };
         rows.push(r);
       }
-      rows.push(info('Tip', 'Paired devices reconnect by themselves when you turn them on.'));
+      rows.push(info('Tip', 'Controllers and keyboards reconnect when you turn them on. Headphones busy with another device (AirPods on your phone) don’t switch by themselves: press A on them and pick Connect.'));
       return rows;
     },
 
