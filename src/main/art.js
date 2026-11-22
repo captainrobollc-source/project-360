@@ -146,6 +146,18 @@ class ArtManager extends EventEmitter {
 
   manualFile(id) { return path.join(this.dir, safeId(id), 'manual.json'); }
 
+  // Games whose id changed keep their downloaded and hand-picked art.
+  renameIds(map) {
+    for (const [a, m] of Object.entries(map || {})) {
+      if (!m || !m.id || m.id === a) continue;
+      const from = path.join(this.dir, safeId(a));
+      const to = path.join(this.dir, safeId(m.id));
+      if (from === to || !fs.existsSync(from) || fs.existsSync(to)) continue;
+      try { fs.renameSync(from, to); } catch (e) { console.error('[art] rename', a, e.message); }
+      if (this.manualAt && this.manualAt.has(a)) { this.manualAt.set(m.id, this.manualAt.get(a)); this.manualAt.delete(a); }
+    }
+  }
+
   // ---- sources ------------------------------------------------------------
   async localCandidate(g) {
     const c = { source: 'local', id: g.id, cover: [], hero: [], banner: [], logo: [], meta: null };

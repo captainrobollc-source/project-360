@@ -6,20 +6,88 @@ import { createSplit } from './split.js';
 import { coverTile } from '../components/tiles.js';
 import { launchGame } from '../components/launch.js';
 import { openDetails } from '../components/details.js';
-import { button, confirm } from '../components/modal.js';
+import { button, confirm, menu } from '../components/modal.js';
 
 const pct = (p) => (p && p.total ? Math.floor((p.received / p.total) * 100) : 0);
+const gb = (n) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`);
+const MOVE_PHASE = { checking: 'Getting ready…', undoing: 'Cancelling…', finishing: 'Switching over…', cleaning: 'Removing the old copy…' };
+const moveText = (p) => (p.phase === 'copying' ? `${pct(p)}% · ${gb(p.received)} of ${gb(p.total)}` : MOVE_PHASE[p.phase] || 'Working…');
 const PHASE = { resolving: 'Finding the latest version…', downloading: 'Downloading', extracting: 'Installing…', failed: 'Failed' };
 
 export function retroBlade(ctx) {
   let st = null;
   const load = async () => { try { st = await window.p360.emu.status(); } catch { st = null; } return st; };
+  let moveVal = null; // the progress text of the "Moving to…" row, updated in place
   window.p360.on('emu:updated', (s) => {
+    const wasMoving = !!(st && st.move);
     st = s;
     const cur = split.current();
-    if (cur === 'emulators' || (cur && cur.startsWith('sys:'))) split.rerender();
+    if (cur === 'bios' && (wasMoving !== !!s.move)) split.rerender();
+    else if (cur === 'bios' && s.move && moveVal && moveVal.isConnected) moveVal.textContent = moveText(s.move);
+    else if (cur === 'emulators' || (cur && cur.startsWith('sys:'))) split.rerender();
     else split.renderList();
   });
+
+  // ---- moving the Emulation folder to another drive
+  let planning = false;
+  async function moveDrive(row) {
+    if (planning || (st && st.move)) return;
+    planning = true;
+    const val = row && row.querySelector('.val');
+    const was = val ? val.textContent : '';
+    if (val) val.textContent = 'Checking drives…';
+    let plan;
+    try { plan = await window.p360.emu.movePlan(); }
+    catch (e) { ctx.toast({ title: 'Couldn’t check your drives', text: e.message, sound: 'error' }); return; }
+    finally { planning = false; if (val && val.isConnected) val.textContent = was; }
+    const others = plan.drives.filter((d) => !d.current);
+    if (!others.length) { ctx.toast({ title: 'No other drives found', text: 'Connect a drive and try again', sound: 'error' }); return; }
+    const size = plan.size ? gb(plan.size.bytes) : '';
+    const pick = await menu({
+      title: `Move emulation${size ? ` (${size})` : ''} to…`,
+      items: others.map((d) => ({ label: `${d.drive} ${d.label || (d.type === 'removable' ? 'Removable drive' : 'Local Disk')}`, right: d.fits ? `${gb(d.free)} free` : 'Not enough space', icon: 'drive', value: d.drive })),
+    });
+    if (!pick) return;
+    const d = others.find((x) => x.drive === pick);
+    if (!d.fits) { ctx.toast({ title: `Not enough space on ${d.drive}`, text: `Needs ${size}, ${gb(d.free)} free`, sound: 'error' }); return; }
+    const ok = await confirm({
+      title: `Move to ${d.drive}?`,
+      text: `Your games, BIOS files, emulators, saves and save states${size ? ` (${size})` : ''} move from ${plan.root} to ${d.drive}. Playtime, favorites and box art come with them.\n\nThe old copy is deleted only after everything has copied and checked out. Emulated games can’t be played while this runs.${d.type === 'removable' ? '\n\nKeep this drive plugged in to play your emulated games.' : ''}`,
+      buttons: [{ label: `Move to ${d.drive}`, value: true, icon: 'drive' }, { label: 'Cancel', value: false }],
+    });
+    if (!ok) return;
+    // Progress shows on this page; main reports how it ended.
+    window.p360.emu.move(pick).catch(() => {}).finally(() => load().then(() => { if (split.current() === 'bios') split.rerender(); }));
+  }
+
+  async function cancelMove() {
+    const p = st && st.move;
+    if (!p || !['checking', 'copying'].includes(p.phase)) return;
+    const ok = await confirm({
+      title: 'Stop moving?',
+      text: 'Everything stays where it is now, and the partial copy is removed.',
+      buttons: [{ label: 'Keep moving', value: false }, { label: 'Stop the move', value: true, danger: true }],
+    });
+    if (ok) window.p360.emu.moveCancel().catch(() => {});
+  }
+
+  function locationRow() {
+    const p = st.move;
+    if (p) {
+      moveVal = h('div.val', {}, moveText(p));
+      const r = h('div.row', { 'data-focus': '', 'data-key': 'move' },
+        h('div.txt', {}, h('div.k', {}, `Moving to ${p.to || 'another drive'}`), h('div.d', {}, 'Emulated games can’t be played until this finishes. Keep both drives connected. Press A to stop.')),
+        h('div.check.wait', {}, '…'), moveVal);
+      r._activate = cancelMove;
+      return r;
+    }
+    moveVal = null;
+    const r = h('div.row', { 'data-focus': '', 'data-key': 'location' },
+      h('div.txt', {}, h('div.k', {}, 'Emulation folder'), h('div.d', {}, st.driveReady ? st.root : `${st.root} · this drive isn’t connected`)),
+      h('div.val', {}, 'Move to another drive'));
+    r._activate = () => moveDrive(r);
+    return r;
+  }
 
   const gamesFor = (sysId) => state.library.filter((g) => g.systemId === sysId && !g.hidden).sort((a, b) => a.sortTitle.localeCompare(b.sortTitle));
   const emuOf = (id) => st && st.emulators.find((e) => e.id === id);
@@ -119,7 +187,8 @@ export function retroBlade(ctx) {
           try { const done = await window.p360.emu.freeFiles(); ctx.toast({ title: 'System files ready', text: done.join(' · '), sound: 'select' }); split.rerender(); }
           catch (e) { ctx.toast({ title: 'Some files failed', text: e.message, sound: 'error' }); }
         } })));
-      pane.append(h('div', { style: { maxWidth: '520px', marginBottom: '18px' } }, button('Download & install PS3 system software', { icon: 'power', right: 'from Sony', onActivate: async () => {
+      pane.append(locationRow());
+      pane.append(h('div', { style: { maxWidth: '520px', margin: '14px 0 18px' } }, button('Download & install PS3 system software', { icon: 'power', right: 'from Sony', onActivate: async () => {
         try { ctx.toast({ title: 'Downloading PS3 system software from Sony…', duration: 4000 }); await window.p360.emu.ps3Firmware(); ctx.toast({ title: 'PS3 system software installed', sound: 'select' }); }
         catch (e) { ctx.toast({ title: 'Not installed', text: e.message, sound: 'error' }); }
       } })));

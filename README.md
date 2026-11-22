@@ -111,6 +111,7 @@ Game Bar using this button on a controller"*.
   - Dolphin's system files, PPSSPP's assets and RetroArch's core info, from the libretro buildbot.
   - Sony's official PS3 system software, from playstation.net, installed into RPCS3.
 - **Still needs your own dumps:** PS2, Sega CD and the original Xbox. Console BIOS files are copyrighted, so Project 360 never downloads them. Retro › BIOS & folders shows exactly what's missing.
+- **Move to another drive:** Retro › BIOS & folders › Emulation folder › Move to another drive lists your drives with their free space, then moves the whole folder (games, BIOS, emulators, saves, states) to `X:\Emulation`. Every file is copied and size-checked before anything switches over. Playtime, favorites, session history and box art follow the games, and emulators are re-pointed at the new BIOS and save folders. The old copy is deleted only after that. You can stop it while it copies; nothing changes if you do. FAT32 drives can't take files over 4 GB, so they're checked up front. While a move runs, emulated games can't be launched and emulator installs wait.
 - **Retro metadata:** descriptions, developer, publisher, year and genre come from libretro's game database (matched by ROM name or checksum) and Wikipedia, with Wikipedia box art as a fallback.
 - **Presentation:** box art is shown at its real shape with a system badge, and pixel-art screenshots stay sharp.
 - Multi-disc and `.cue`/`.bin` sets are handled. PS3 and Wii U games can also be extracted game folders.

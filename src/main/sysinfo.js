@@ -96,6 +96,29 @@ async function fixedDrives() {
   return drives;
 }
 
+// Drives the Emulation folder can move to: fixed disks plus removable/external ones, with space.
+async function moveDrives() {
+  let drives = [];
+  if (IS_WIN) {
+    const { stdout } = await powershell("[IO.DriveInfo]::GetDrives() | Where-Object { ($_.DriveType -eq 'Fixed' -or $_.DriveType -eq 'Removable') -and $_.IsReady } | ForEach-Object { $_.Name + '|' + $_.DriveType + '|' + $_.DriveFormat + '|' + $_.VolumeLabel }", 8000);
+    for (const line of stdout.split(/\r?\n/)) {
+      const m = line.match(/^([A-Z]):\\?\|(\w+)\|([^|]*)\|(.*)$/i);
+      if (m) drives.push({ drive: `${m[1].toUpperCase()}:`, type: m[2].toLowerCase(), format: m[3].trim(), label: m[4].trim() });
+    }
+    if (!drives.length) drives = (await fixedDrives()).map((d) => ({ ...d, type: 'fixed', format: '' }));
+  }
+  return Promise.all(drives.map(async (d) => {
+    let total = null;
+    let free = null;
+    try {
+      const s = await fs.promises.statfs(`${d.drive}\\`);
+      total = s.blocks * s.bsize;
+      free = s.bavail * s.bsize;
+    } catch { /* not ready */ }
+    return { ...d, total, free };
+  }));
+}
+
 function driveOf(p) {
   if (!p) return null;
   const m = String(p).match(/^([A-Za-z]):/);
@@ -218,4 +241,4 @@ async function testNetwork({ onResult } = {}) {
   }));
 }
 
-module.exports = { getInfo, getStorage, testNetwork };
+module.exports = { getInfo, getStorage, testNetwork, moveDrives };

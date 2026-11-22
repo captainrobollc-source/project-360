@@ -615,6 +615,7 @@ handle('game:launch', async (e, id) => {
   if (NO_LAUNCH && g.source !== 'arcade') throw new Error('Launching is disabled in scripted test runs');
   if (g.source === 'arcade') throw new Error('ARCADE'); // the renderer runs these itself
   if (g.systemId) {
+    emulation.notMoving();
     // Emulated game: make sure its emulator / core is there (cores install on demand).
     g.launch = emulation.relaunchInfo(g);
     if (g.launch.type === 'core-missing') {
@@ -1005,6 +1006,53 @@ handle('emu:ps3fw', () => emulation.installPs3Firmware());
 handle('emu:freeFiles', async () => { const done = await emulation.installFreeFiles(); await maybeRescan(true); return done; });
 emulation.on('firmware', ({ name }) => toast({ kind: 'orb', icon: 'controller', title: `${name} installed`, text: 'PS3 games are ready', sound: 'achievement' }));
 emulation.on('firmwareFailed', ({ error }) => toast({ title: 'PS3 firmware not installed', text: error, sound: 'error' }));
+// Moving the Emulation folder to another drive.
+const sizeText = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`);
+const driveLetter = (p) => path.parse(path.resolve(p)).root.slice(0, 2).toUpperCase();
+handle('emu:movePlan', async () => {
+  const si = svc('sysinfo');
+  const root = emulation.root();
+  const [drives, size] = await Promise.all([si ? si.moveDrives().catch(() => []) : [], emulation.measure().catch(() => null)]);
+  const cur = driveLetter(root);
+  const need = size ? size.bytes + 256 * 1024 * 1024 : 0;
+  return {
+    root, ready: emulation.driveReady(), size,
+    drives: drives.map((d) => ({ ...d, current: d.drive === cur, fits: d.free == null || !size || d.free >= need })).sort((a, b) => a.drive.localeCompare(b.drive)),
+  };
+});
+handle('emu:move', async (e, drive) => {
+  try {
+    const cur = launcher.current;
+    if (cur && cur.item && cur.item.systemId) throw new Error(`Close ${cur.item.title} first`);
+    const si = svc('sysinfo');
+    let info = null;
+    try { info = si && (await si.moveDrives()).find((d) => d.drive === String(drive || '').slice(0, 2).toUpperCase()); } catch { /* unknown format */ }
+    const res = await emulation.move(drive, {
+      maxFile: info && /^fat(32)?$/i.test(info.format || '') ? 4294967295 : 0,
+      // A library scan that started before the switch would write the old ids back: wait it out.
+      beforeSwitch: async () => { while (library.scanning) await library.scanning.catch(() => {}); },
+      onSwitch: (from, to) => {
+        const map = emulation.remapFor(Object.values(library.games()), from, to);
+        library.remapIds(map);
+        art.renameIds(map);
+        try { library.flush(); } catch { /* saved on the next tick */ }
+      },
+    });
+    await maybeRescan(true);
+    broadcast('emu:updated', emulation.status());
+    broadcast('settings:updated', settingsView());
+    toast({
+      kind: 'orb', icon: 'folder', title: `Emulation moved to ${driveLetter(res.to)}`, sound: 'achievement',
+      text: res.kept ? `${res.kept} old file${res.kept === 1 ? '' : 's'} couldn’t be removed from ${res.from}` : `${sizeText(res.bytes)} · ready to play`,
+    });
+    return { to: res.to, bytes: res.bytes, kept: res.kept };
+  } catch (err) {
+    if (err.cancelled) toast({ title: 'Move cancelled', text: 'Your emulation files stayed where they were', sound: 'toast' });
+    else toast({ title: 'Couldn’t move emulation', text: err.message, sound: 'error' });
+    throw err;
+  }
+});
+handle('emu:moveCancel', () => emulation.cancelMove());
 handle('emu:openFolder', async (e, kind, systemId) => {
   const d = emulation.dirs();
   const target = kind === 'bios' ? d.bios : kind === 'root' ? d.root : systemId ? emulation.romDir(emulation.system(systemId)) : d.roms;

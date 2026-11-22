@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('p360', {
     ps3Firmware: () => call('emu:ps3fw'),
     freeFiles: () => call('emu:freeFiles'),
     openFolder: (kind, systemId) => call('emu:openFolder', kind, systemId),
+    movePlan: () => call('emu:movePlan'),
+    move: (drive) => call('emu:move', drive),
+    moveCancel: () => call('emu:moveCancel'),
   },
   stores: {
     list: () => call('stores:list'),

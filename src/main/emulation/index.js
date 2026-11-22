@@ -10,8 +10,11 @@ const path = require('path');
 const { JsonStore } = require('../store');
 const { hash, sortTitle } = require('../library/util');
 const { SYSTEMS, EMULATORS, RA_CORES, SYSTEM_ASSETS, PS3_UPDATE_LIST } = require('./catalog');
+const mv = require('./move');
 
 const SEVENZR = 'https://www.7-zip.org/a/7zr.exe';
+const MOVE_MARKER = '.p360-move-incomplete';
+const gb = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`);
 
 function run(file, args, opts = {}) {
   return new Promise((resolve) => execFile(file, args, { windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout: 30 * 60 * 1000, ...opts },
@@ -71,7 +74,15 @@ class Emulation extends EventEmitter {
   }
   romDir(sys) { return path.join(this.dirs().roms, sys.id); }
 
+  // The drive the Emulation folder lives on is plugged in (an external drive may not be).
+  driveReady() { try { return fs.existsSync(path.parse(path.resolve(this.root())).root); } catch { return false; } }
+
   ensureFolders() {
+    if (!this.driveReady()) return; // external drive unplugged: don't fail start-up over it
+    try { this.makeFolders(); } catch (e) { console.error('[emulation] folders:', e.message); }
+  }
+
+  makeFolders() {
     const d = this.dirs();
     for (const k of ['roms', 'bios', 'emulators', 'saves', 'states', 'tools']) fs.mkdirSync(d[k], { recursive: true });
     for (const s of SYSTEMS) {
@@ -120,6 +131,8 @@ class Emulation extends EventEmitter {
     return {
       root: this.root(),
       dirs: this.dirs(),
+      driveReady: this.driveReady(),
+      move: this.progress.move || null,
       emulators: EMULATORS.map((e) => ({ id: e.id, name: e.name, about: e.about, license: e.license, site: e.site, installed: !!this.exeOf(e.id), version: (this.emuInfo(e.id) || {}).version || '', progress: this.progress[e.id] || null })),
       systems: SYSTEMS.map((s) => {
         const eff = this.effective(s);
@@ -138,8 +151,9 @@ class Emulation extends EventEmitter {
   setProgress(id, p) {
     if (p) this.progress[id] = { ...(this.progress[id] || {}), ...p };
     else delete this.progress[id];
-    clearTimeout(this.progressTimer);
-    this.progressTimer = setTimeout(() => this.emit('updated', this.status()), 250);
+    // At most one broadcast per 250 ms, carrying the latest state. (A debounce would starve while
+    // a copy reports every 250 ms, and the UI would see nothing until the end.)
+    if (!this.progressTimer) this.progressTimer = setTimeout(() => { this.progressTimer = null; this.emit('updated', this.status()); }, 250);
   }
 
   // ------------------------------------------------------------------ downloads / extraction
@@ -213,6 +227,7 @@ class Emulation extends EventEmitter {
   async install(id) {
     const emu = EMULATORS.find((e) => e.id === id);
     if (!emu) throw new Error('Unknown emulator');
+    this.notMoving();
     if (this.progress[id] && ['resolving', 'downloading', 'extracting'].includes(this.progress[id].phase)) return;
     try {
       this.setProgress(id, { phase: 'resolving', received: 0, total: 0, error: null });
@@ -243,6 +258,7 @@ class Emulation extends EventEmitter {
   installCore(core) { return this.once(`core:${core}`, () => this.installCoreNow(core)); }
 
   async installCoreNow(core) {
+    this.notMoving();
     const ra = this.exeOf('retroarch');
     if (!ra) throw new Error('Install RetroArch first');
     const key = `core:${core}`;
@@ -395,8 +411,13 @@ class Emulation extends EventEmitter {
     }
   }
 
-  // Library scanner interface: { ok, games }
+  romId(file) { return `rom:${hash(file)}`; }
+
+  // Library scanner interface: { ok, games }. While the folder is being moved, or its drive is
+  // unplugged, the scan "fails" so the library keeps the games it has instead of dropping them.
   async scan() {
+    if (this.moving) return { ok: false, games: [] };
+    if (!this.driveReady()) return { ok: false, games: [], note: `the ${path.parse(path.resolve(this.root())).root.slice(0, 2)} drive with your Emulation folder isn’t connected` };
     const games = [];
     const counts = {};
     for (const sys of SYSTEMS) {
@@ -407,7 +428,7 @@ class Emulation extends EventEmitter {
         const launch = this.launchFor(sys, r.file);
         const exe = launch.type === 'exe' ? path.basename(launch.target) : null;
         games.push({
-          id: `rom:${hash(r.file)}`,
+          id: this.romId(r.file),
           source: 'rom',
           title: r.title,
           sortTitle: sortTitle(r.title),
@@ -436,6 +457,138 @@ class Emulation extends EventEmitter {
 
   system(id) { return SYSTEMS.find((s) => s.id === id); }
 
+  // ------------------------------------------------------------------ moving to another drive
+  notMoving() { if (this.moving) throw new Error('Your emulation files are being moved. Try again when that finishes.'); }
+
+  // Downloads, installs or extractions in flight (they write into the folder being moved).
+  busy() {
+    return Object.entries(this.progress).some(([k, p]) => k !== 'move' && p && p.phase !== 'failed') || !!(this.inflight && this.inflight.size);
+  }
+
+  // How big the Emulation folder is.
+  async measure() {
+    if (!this.driveReady() || !fs.existsSync(this.root())) return null;
+    const inv = await mv.inventory(this.root());
+    return { bytes: inv.bytes, files: inv.files.length };
+  }
+
+  // Where the folder goes on a drive: X:\Emulation, or X:\Project 360\Emulation if something else
+  // already has that name. Back on the drive with the user's home folder, it's the default spot.
+  // A folder holding a half-finished earlier move (the app was closed mid-copy) is reused.
+  async targetOn(drive) {
+    const m = /^([A-Za-z]):?\\?$/.exec(String(drive || ''));
+    if (!m) throw new Error('Pick a drive');
+    const letter = m[1].toUpperCase();
+    const top = `${letter}:\\`;
+    if (!fs.existsSync(top)) throw new Error(`${letter}: isn’t connected`);
+    const home = path.join(app.getPath('home'), 'Emulation');
+    const testDir = process.env.P360_SCRIPT && process.env.P360_MOVE_DIR; // scripted runs stay out of drive roots
+    const list = testDir ? [path.join(top, testDir, 'Emulation')]
+      : mv.driveOf(home) === top.toLowerCase() ? [home, path.join(top, 'Emulation')] : [path.join(top, 'Emulation'), path.join(top, 'Project 360', 'Emulation')];
+    const cur = path.resolve(this.root());
+    for (const c of list) {
+      if (mv.inside(c, cur) || mv.inside(cur, c)) continue; // never the folder in use
+      if (fs.existsSync(path.join(c, MOVE_MARKER))) { await fs.promises.rm(c, { recursive: true, force: true }); return c; }
+      if (await mv.isEmptyDir(c) === true) return c;
+    }
+    throw new Error(`${letter}: already has an Emulation folder with files in it`);
+  }
+
+  cancelMove() {
+    const m = this.moving;
+    if (!m || m.committed) return false;
+    m.ctrl.abort();
+    return true;
+  }
+
+  // Copy -> verify -> switch -> delete the old copy. hooks.beforeSwitch() is awaited first (the
+  // library waits out any scan); hooks.onSwitch(from, to) runs synchronously right after the
+  // switch so game ids can be remapped before anything else looks at them.
+  async move(drive, hooks = {}) {
+    if (this.moving) throw new Error('A move is already running');
+    if (this.busy()) throw new Error('Wait for downloads and installs to finish first');
+    const from = path.resolve(this.root());
+    if (!this.driveReady() || !fs.existsSync(from)) throw new Error('The Emulation folder can’t be found');
+    if (path.parse(from).root.toLowerCase() === from.toLowerCase()) throw new Error('Your Emulation folder is a whole drive, so it can’t be moved from here');
+    const ctrl = new AbortController();
+    this.moving = { ctrl, from, committed: false };
+    this.setProgress('move', { phase: 'checking', received: 0, total: 0, files: 0, fileCount: 0, from, to: '', error: null });
+    let to = null;
+    let made = false; // the target folder was created by this move
+    try {
+      const letter = (/^([A-Za-z])/.exec(String(drive || '')) || [])[1];
+      if (letter && `${letter}:\\`.toLowerCase() === path.parse(from).root.toLowerCase()) throw new Error('It’s already on that drive');
+      to = await this.targetOn(drive);
+      if (mv.driveOf(to) === mv.driveOf(from)) throw new Error('It’s already on that drive');
+      if (mv.inside(to, from) || mv.inside(from, to)) throw new Error('Pick a different drive');
+      this.moving.to = to;
+      this.setProgress('move', { to });
+      const inv = await mv.inventory(from, ctrl.signal);
+      if (hooks.maxFile && inv.largest && inv.largest.size > hooks.maxFile) {
+        throw new Error(`${to.slice(0, 2)} is formatted FAT32, which can’t hold files over 4 GB like ${path.basename(inv.largest.rel)}`);
+      }
+      const free = await mv.freeSpace(to);
+      const need = inv.bytes + 256 * 1024 * 1024;
+      if (free != null && free < need) throw new Error(`Not enough space on ${to.slice(0, 2)} (needs ${gb(need)}, ${gb(free)} free)`);
+      made = !fs.existsSync(to);
+      const parentMade = !fs.existsSync(path.dirname(to)); // e.g. X:\Project 360
+      await fs.promises.mkdir(to, { recursive: true });
+      await fs.promises.writeFile(path.join(to, MOVE_MARKER), `Unfinished move from ${from}. Safe to delete.\r\n`);
+      try {
+        await mv.copyTree(from, to, inv, { signal: ctrl.signal, progress: (p) => this.setProgress('move', { phase: 'copying', ...p }) });
+        if (ctrl.signal.aborted) throw mv.abortError();
+      } catch (e) {
+        this.setProgress('move', { phase: 'undoing' });
+        await fs.promises.rm(to, { recursive: true, force: true }).catch(() => {});
+        if (!made) await fs.promises.mkdir(to, { recursive: true }).catch(() => {});
+        else if (parentMade && await mv.isEmptyDir(path.dirname(to)) === true) await fs.promises.rmdir(path.dirname(to)).catch(() => {});
+        throw e;
+      }
+
+      // Everything arrived. Point at the new folder (nothing can be cancelled from here on).
+      this.moving.committed = true;
+      this.setProgress('move', { phase: 'finishing' });
+      if (hooks.beforeSwitch) await hooks.beforeSwitch();
+      this.switchRoot(from, to);
+      if (hooks.onSwitch) { try { hooks.onSwitch(from, to); } catch (e) { console.error('[emulation] remap:', e); } }
+      try { this.settings.flush(); } catch { /* saved on the next tick anyway */ }
+      try { this.state.flush(); } catch { /* ignore */ }
+      try { fs.unlinkSync(path.join(to, MOVE_MARKER)); } catch { /* ignore */ }
+      for (const e of EMULATORS) { if (this.exeOf(e.id)) { try { await this.configure(e.id); } catch (err) { console.error('[emulation] configure', e.id, err.message); } } }
+
+      this.setProgress('move', { phase: 'cleaning' });
+      const kept = await mv.removeCopied(from, inv);
+      return { from, to, bytes: inv.bytes, files: inv.files.length, kept, links: inv.links };
+    } finally {
+      this.moving = null;
+      this.setProgress('move', null);
+    }
+  }
+
+  // Re-point everything that stores an absolute path inside the old folder.
+  switchRoot(from, to) {
+    const rebase = (p) => (p && mv.inside(p, from) ? path.join(to, path.relative(from, p)) : p);
+    for (const info of Object.values(this.state.data.emulators || {})) if (info && info.exe) info.exe = rebase(info.exe);
+    this.state.save();
+    this.settings.set('emulation.root', mv.same(to, path.join(app.getPath('home'), 'Emulation')) ? '' : to);
+    const extra = this.settings.get('emulation.extraFolders') || {};
+    let changed = false;
+    const next = {};
+    for (const [k, list] of Object.entries(extra)) next[k] = (Array.isArray(list) ? list : []).map((d) => { const r = rebase(d); if (r !== d) changed = true; return r; });
+    if (changed) this.settings.set('emulation.extraFolders', next);
+  }
+
+  // Old game id -> new id (and paths) for every emulated game whose file was in the old folder.
+  remapFor(games, from, to) {
+    const map = {};
+    for (const g of games) {
+      if (!g || !g.systemId || !g.romPath || !mv.inside(g.romPath, from)) continue;
+      const romPath = path.join(to, path.relative(from, g.romPath));
+      map[g.id] = { id: this.romId(romPath), patch: { romPath, installDir: path.dirname(romPath) } };
+    }
+    return map;
+  }
+
   // ------------------------------------------------------------------ RetroArch control
   retroarch(cmd) {
     const allowed = ['SAVE_STATE', 'LOAD_STATE', 'RESET', 'MENU_TOGGLE', 'PAUSE_TOGGLE', 'STATE_SLOT_PLUS', 'STATE_SLOT_MINUS', 'FAST_FORWARD', 'SCREENSHOT', 'FULLSCREEN_TOGGLE'];
@@ -457,6 +610,7 @@ class Emulation extends EventEmitter {
 
   async installAsset(id) {
     const a = SYSTEM_ASSETS[id];
+    this.notMoving();
     const dest = a && this.assetDest(id);
     if (!dest) return false;
     const key = `asset:${id}`;
@@ -497,6 +651,7 @@ class Emulation extends EventEmitter {
   }
 
   async installPs3Firmware() {
+    this.notMoving();
     const exe = this.exeOf('rpcs3');
     if (!exe) throw new Error('Install RPCS3 first');
     const pup = await this.downloadPs3Firmware();

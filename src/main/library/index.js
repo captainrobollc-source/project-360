@@ -58,6 +58,36 @@ class Library extends EventEmitter {
     return all[id];
   }
 
+  // Games whose id changes (emulated games after their folder moved): carry over the library
+  // entry and every profile's playtime, favorites and session history.
+  // map: { oldId: { id: newId, patch: { ...fields to update } } }
+  remapIds(map) {
+    const moves = Object.entries(map || {}).filter(([a, m]) => m && m.id && m.id !== a);
+    if (!moves.length) return 0;
+    const games = this.lib.data.games;
+    for (const [a, m] of moves) {
+      const g = games[a];
+      if (!g) continue;
+      delete games[a];
+      games[m.id] = { ...g, ...(m.patch || {}), id: m.id };
+    }
+    const ren = new Map(moves.map(([a, m]) => [a, m.id]));
+    for (const p of Object.values(this.user.data.profiles || {})) {
+      if (p.games) {
+        for (const [a, b] of ren) {
+          if (!p.games[a]) continue;
+          p.games[b] = { ...(p.games[b] || {}), ...p.games[a] };
+          delete p.games[a];
+        }
+      }
+      if (Array.isArray(p.sessions)) for (const s of p.sessions) if (s && ren.has(s.id)) s.id = ren.get(s.id);
+    }
+    this.lib.save();
+    this.user.save();
+    this.emit('changed');
+    return moves.length;
+  }
+
   patchGame(id, patch) {
     const g = this.game(id);
     if (!g) return;
