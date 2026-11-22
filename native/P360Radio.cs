@@ -12,7 +12,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Windows.Devices.Bluetooth.Advertisement;
 using Windows.Devices.Enumeration;
+using Windows.Devices.Enumeration.Pnp;
 using Windows.Devices.Radios;
 using Windows.Devices.WiFi;
 using Windows.Foundation;
@@ -73,6 +75,7 @@ namespace P360Radio
                 case "bt.reply": Bt.Reply(Arg(p, 2), Arg(p, 3) == "1", Arg(p, 4)); return "true";
                 case "bt.unpair": return await Bt.Unpair(Arg(p, 2));
                 case "bt.audio.list": return BtAudio.List();
+                case "bt.battery": return await Battery.Read();
                 case "bt.audio.connect": return BtAudio.Connect(Arg(p, 2), Arg(p, 3), Arg(p, 4) != "0");
                 case "wifi.scan": return await Wifi.Scan(true);
                 case "wifi.status": return await Wifi.Scan(false);
@@ -450,7 +453,19 @@ namespace P360Radio
         static readonly PROPERTYKEY PKEY_DeviceInterface_FriendlyName = Key("026e516e-b814-414b-83cd-856d6fef4822", 2);
         static readonly PROPERTYKEY PKEY_Device_ContainerId = Key("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c", 2);
 
-        class Group { public string Container, Mac, Name; public bool Connected; public List<string> Filters = new List<string>(); }
+        public class Group { public string Container, Mac, Name; public int Vid, Pid; public bool Connected; public List<string> Filters = new List<string>(); }
+
+        public static List<Group> All() { return Groups(Enumerator()); }
+
+        // ..._VID&0001004C_PID&2024\... → (0x004C, 0x2024)
+        static void VidPid(string filterId, out int vid, out int pid)
+        {
+            vid = pid = 0;
+            var m = System.Text.RegularExpressions.Regex.Match(filterId ?? "", @"vid&([0-9a-f]{8})_pid&([0-9a-f]{4})", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (!m.Success) return;
+            vid = Convert.ToInt32(m.Groups[1].Value.Substring(4), 16);
+            pid = Convert.ToInt32(m.Groups[2].Value, 16);
+        }
 
         static string StrProp(IPropertyStore st, PROPERTYKEY k)
         {
@@ -526,6 +541,7 @@ namespace P360Radio
                     Group g;
                     if (!byKey.TryGetValue(key, out g)) { g = new Group { Container = container }; byKey[key] = g; }
                     if (g.Mac == null) g.Mac = mac;
+                    if (g.Pid == 0) { int vid, pid; VidPid(filter, out vid, out pid); g.Vid = vid; g.Pid = pid; }
                     if (g.Name == null || (name != null && name.Length < g.Name.Length)) g.Name = name ?? g.Name;
                     if (state == DEVICE_STATE_ACTIVE) g.Connected = true;
                     if (!g.Filters.Contains(filter)) g.Filters.Add(filter);
@@ -580,6 +596,122 @@ namespace P360Radio
             }
             return "{\"found\":true,\"sent\":" + sent + ",\"filters\":" + g.Filters.Count + ",\"connected\":" + Json.Bool(g.Connected) +
                 ",\"errors\":[" + string.Join(",", errors.Select(Json.Str)) + "]}";
+        }
+    }
+
+    // ---- Battery for Bluetooth audio devices.
+    //  * AirPods / Beats: their Bluetooth LE "proximity" broadcasts (what an iPhone's battery pop-up
+    //    reads) carry left, right and case battery in 10% steps. They're sent while the buds are out
+    //    or the case is open, even when connected to a phone. Matched to a paired device by Apple
+    //    model number (the PID in the device's driver id), strongest signal first.
+    //  * Anything else: the level Windows reads over Hands-Free while the device is connected.
+    static class Battery
+    {
+        class Apple { public int Model; public int? Left, Right, Case; public bool ChL, ChR, ChCase; public short Rssi; public int At; }
+        static readonly Dictionary<int, Apple> seen = new Dictionary<int, Apple>(); // model → best recent reading
+        static BluetoothLEAdvertisementWatcher watcher;
+        static int lastAsk;
+        static Timer idle;
+
+        static int? Pct(int n) { return n <= 10 ? (int?)(n * 10) : null; } // 15 = not reported
+
+        static void EnsureWatcher()
+        {
+            lock (seen)
+            {
+                lastAsk = Environment.TickCount;
+                if (watcher != null && (watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started || watcher.Status == BluetoothLEAdvertisementWatcherStatus.Created)) {
+                    if (watcher.Status == BluetoothLEAdvertisementWatcherStatus.Created) { try { watcher.Start(); } catch { } }
+                    return;
+                }
+                if (watcher != null) watcher.Received -= OnAdvert;
+                watcher = new BluetoothLEAdvertisementWatcher { ScanningMode = BluetoothLEScanningMode.Passive };
+                watcher.Received += OnAdvert;
+                try { watcher.Start(); } catch { /* Bluetooth off */ }
+                // Listening costs a little power: stop a minute after the last question.
+                if (idle == null) idle = new Timer(_ =>
+                {
+                    lock (seen)
+                    {
+                        if (watcher != null && Environment.TickCount - lastAsk > 60000 && watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started) { try { watcher.Stop(); } catch { } }
+                    }
+                }, null, 15000, 15000);
+            }
+        }
+
+        static void OnAdvert(BluetoothLEAdvertisementWatcher w, BluetoothLEAdvertisementReceivedEventArgs args)
+        {
+            try
+            {
+                foreach (var md in args.Advertisement.ManufacturerData)
+                {
+                    if (md.CompanyId != 0x004C) continue;
+                    var buf = md.Data;
+                    byte[] d = new byte[buf.Length];
+                    Windows.Storage.Streams.DataReader.FromBuffer(buf).ReadBytes(d);
+                    if (d.Length < 8 || d[0] != 0x07) continue; // 0x07 = proximity pairing (AirPods, Beats)
+                    int model = d[3] | (d[4] << 8);             // 0x0E 0x20 → 0x200E
+                    bool flip = (d[5] & 0x20) == 0;              // which bud is reported first
+                    int hi = d[6] >> 4, lo = d[6] & 0xF, charge = d[7] >> 4;
+                    var a = new Apple
+                    {
+                        Model = model, Left = Pct(flip ? hi : lo), Right = Pct(flip ? lo : hi), Case = Pct(d[7] & 0xF),
+                        ChL = (charge & (flip ? 2 : 1)) != 0, ChR = (charge & (flip ? 1 : 2)) != 0, ChCase = (charge & 4) != 0,
+                        Rssi = args.RawSignalStrengthInDBm, At = Environment.TickCount,
+                    };
+                    lock (seen)
+                    {
+                        // Several of the same model nearby: the strongest signal (closest) wins; a
+                        // reading older than 10 s gives way to anything.
+                        Apple prev;
+                        if (!seen.TryGetValue(model, out prev) || a.Rssi >= prev.Rssi - 6 || a.At - prev.At > 10000) seen[model] = a;
+                    }
+                }
+            }
+            catch { /* malformed advertisement */ }
+        }
+
+        static async Task<int?> WindowsLevel(string container)
+        {
+            if (string.IsNullOrEmpty(container)) return null;
+            const string key = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2"; // Bluetooth battery level
+            var list = await W.A(PnpObject.FindAllAsync(PnpObjectType.Device, new[] { key }, "System.Devices.ContainerId:=\"{" + container + "}\""));
+            foreach (var o in list)
+            {
+                object v;
+                if (!o.Properties.TryGetValue(key, out v) || v == null) continue;
+                try { int n = Convert.ToInt32(v); if (n >= 0 && n <= 100) return n; } catch { /* not a number */ }
+            }
+            return null;
+        }
+
+        static string AppleJson(Apple a)
+        {
+            return "{\"left\":" + Json.Num(a.Left) + ",\"right\":" + Json.Num(a.Right) + ",\"case\":" + Json.Num(a.Case) +
+                ",\"chargingLeft\":" + Json.Bool(a.ChL) + ",\"chargingRight\":" + Json.Bool(a.ChR) + ",\"chargingCase\":" + Json.Bool(a.ChCase) +
+                ",\"rssi\":" + a.Rssi + ",\"age\":" + (Environment.TickCount - a.At) + "}";
+        }
+
+        public static async Task<string> Read()
+        {
+            bool fresh;
+            lock (seen) fresh = watcher != null && watcher.Status == BluetoothLEAdvertisementWatcherStatus.Started && seen.Values.Any(x => Environment.TickCount - x.At < 30000);
+            EnsureWatcher();
+            if (!fresh) await Task.Delay(2500); // broadcasts arrive several times a second
+            var parts = new List<string>();
+            foreach (var g in BtAudio.All())
+            {
+                int? win = null;
+                try { win = await WindowsLevel(g.Container); } catch { /* unknown */ }
+                Apple a = null;
+                if (g.Vid == 0x004C && g.Pid != 0)
+                {
+                    lock (seen) { Apple x; if (seen.TryGetValue(g.Pid, out x) && Environment.TickCount - x.At < 60000) a = x; }
+                }
+                parts.Add("{\"mac\":" + Json.Str(g.Mac) + ",\"name\":" + Json.Str(g.Name) + ",\"level\":" + Json.Num(win) +
+                    ",\"apple\":" + (a == null ? "null" : AppleJson(a)) + "}");
+            }
+            return "[" + string.Join(",", parts) + "]";
         }
     }
 

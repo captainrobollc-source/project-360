@@ -60,6 +60,20 @@ function textRow(k, d, path, { secret = false } = {}) {
   return r;
 }
 const info = (k, d, v) => row(k, d, v ? h('div.val', {}, v) : null, 'info');
+// "L 80% · R 90% · Case 40% ⚡" for AirPods; "Battery 70%" for other headsets.
+function headsetBattery(b) {
+  if (!b) return '';
+  const pct = (n, charging) => `${n}%${charging ? ' ⚡' : ''}`;
+  const parts = [];
+  if (b.left != null && b.right != null && b.left === b.right && !!b.chargingLeft === !!b.chargingRight) parts.push(`Buds ${pct(b.left, b.chargingLeft)}`);
+  else {
+    if (b.left != null) parts.push(`L ${pct(b.left, b.chargingLeft)}`);
+    if (b.right != null) parts.push(`R ${pct(b.right, b.chargingRight)}`);
+  }
+  if (b.case != null) parts.push(`Case ${pct(b.case, b.chargingCase)}`);
+  if (!parts.length && b.level != null) parts.push(`Battery ${b.level}%`);
+  return parts.join(' · ');
+}
 const gb = (n) => (n == null ? '—' : n >= 1e12 ? `${(n / 1e12).toFixed(2)} TB` : `${(n / 1e9).toFixed(1)} GB`);
 
 export function systemBlade(ctx) {
@@ -67,6 +81,7 @@ export function systemBlade(ctx) {
   let wifiScanning = false;
   let joining = false; // a Wi-Fi connect is in progress
   let btConnecting = false; // a Bluetooth connect/disconnect is in progress
+  let btPoll = null; // keeps battery levels fresh while System › Bluetooth is open
   let netTest = { running: false, res: null }; // last connection test, kept across re-renders
   const SECTIONS = [
     ['console', 'Console', 'tv'], ['themes', 'Themes', 'image'], ['library', 'Library', 'grid'], ['artwork', 'Artwork', 'star'],
@@ -342,8 +357,15 @@ export function systemBlade(ctx) {
         }
         split.rerender();
       };
+      if (!btPoll) {
+        btPoll = setInterval(() => {
+          if (split.current() !== 'bluetooth' || document.hidden) { clearInterval(btPoll); btPoll = null; return; }
+          window.p360.bt.paired().catch(() => {}); // a change re-renders through the bt.paired event
+        }, 10000);
+      }
       for (const d of paired) {
-        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : d.audio ? 'Not connected · A to connect' : 'Not connected'}`, h('div.val', {}, d.connected ? '●' : ''), d.connected ? 'connected' : '');
+        const batt = headsetBattery(d.battery);
+        const r = row(d.name, `${KIND_LABEL[d.kind] || 'Bluetooth'} · ${d.connected ? 'Connected' : d.audio ? 'Not connected · A to connect' : 'Not connected'}`, h('div.val', {}, batt || (d.connected ? '●' : '')), d.connected ? 'connected' : '');
         r.dataset.key = `bt:${d.id}`;
         r._activate = async () => {
           const items = [];
@@ -361,7 +383,7 @@ export function systemBlade(ctx) {
         };
         rows.push(r);
       }
-      rows.push(info('Tip', 'Controllers and keyboards reconnect when you turn them on. Headphones busy with another device (AirPods on your phone) don’t switch by themselves: press A on them and pick Connect.'));
+      rows.push(info('Tip', 'Controllers and keyboards reconnect when you turn them on. Headphones busy with another device (AirPods on your phone) don’t switch by themselves: press A on them and pick Connect. AirPods show their battery while they’re out of the case or the lid is open.'));
       return rows;
     },
 

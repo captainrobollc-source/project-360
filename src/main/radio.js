@@ -63,6 +63,38 @@ function audioFor(d, audio) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Battery levels: AirPods/Beats broadcasts (left, right, case) or what Windows reads from a
+// connected headset. Refreshed while System › Bluetooth asks for the list.
+const batteryByKey = new Map(); // address or name → { left, right, case, charging…, level }
+let batteryAt = 0;
+let batteryInflight = null;
+const batteryFor = (d) => batteryByKey.get(macOf(d.id)) || batteryByKey.get(nameKey(d.name)) || null;
+function refreshBattery() {
+  if (batteryInflight || Date.now() - batteryAt < 8000) return;
+  batteryInflight = (async () => {
+    await ensure();
+    const list = await helper.callT(12000, 'bt.battery');
+    batteryByKey.clear();
+    for (const b of list || []) {
+      const a = b.apple;
+      if (b.level == null && !a) continue;
+      const v = a
+        ? { left: a.left, right: a.right, case: a.case, chargingLeft: a.chargingLeft, chargingRight: a.chargingRight, chargingCase: a.chargingCase, level: b.level }
+        : { level: b.level };
+      if (b.mac) batteryByKey.set(b.mac, v);
+      if (b.name) batteryByKey.set(nameKey(b.name), v);
+    }
+    batteryAt = Date.now();
+    if (cache.paired) {
+      const next = cache.paired.map((d) => ({ ...d, battery: batteryFor(d) }));
+      if (JSON.stringify(next) !== JSON.stringify(cache.paired)) {
+        cache.paired = next;
+        events.emit('event', { type: 'bt.paired', list: next });
+      }
+    }
+  })().catch(() => {}).finally(() => { batteryInflight = null; });
+}
+
 // Cached answers so System › Bluetooth / Network open instantly; a background refresh follows.
 const cache = { radios: null, radiosAt: 0, paired: null, pairedAt: 0 };
 let pairedInflight = null;
@@ -75,7 +107,7 @@ async function fetchPaired() {
       .map((d) => {
         const a = audioFor(d, audio);
         // Headphones and speakers can be connected by hand (like Windows' Connect button).
-        return { ...d, kind: kindOf(d), audio: !!a, connected: d.connected || !!(a && a.connected) };
+        return { ...d, kind: kindOf(d), audio: !!a, connected: d.connected || !!(a && a.connected), battery: batteryFor(d) };
       })
       .sort((a, b) => (b.connected - a.connected) || a.name.localeCompare(b.name));
     const changed = JSON.stringify(list) !== JSON.stringify(cache.paired);
@@ -153,6 +185,7 @@ const api = {
 
   // Cached list right away (refreshing behind it when older than 10 s); waits only the first time.
   async paired({ fresh = false } = {}) {
+    refreshBattery();
     if (cache.paired && !fresh) {
       if (Date.now() - cache.pairedAt > 10000) fetchPaired().catch(() => {});
       return cache.paired;

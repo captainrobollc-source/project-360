@@ -19,6 +19,7 @@ const TARGETS = [
     refs: [
       path.join(winmd, 'Windows.Foundation.winmd'), path.join(winmd, 'Windows.Devices.winmd'),
       path.join(winmd, 'Windows.Networking.winmd'), path.join(winmd, 'Windows.Security.winmd'),
+      path.join(winmd, 'Windows.Storage.winmd'),
       path.join(fw, 'System.Runtime.WindowsRuntime.dll'), path.join(fw, 'System.Runtime.dll'),
       path.join(fw, 'System.Threading.Tasks.dll'), path.join(fw, 'System.Runtime.InteropServices.WindowsRuntime.dll'),
     ],
