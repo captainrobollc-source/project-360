@@ -260,7 +260,7 @@ export function createGuide({ mode, goto, toast, launch, signIn }) {
   async function forceClose(st) {
     const ok = await confirm({
       title: `Close ${st.title}?`,
-      text: st.kind === 'media' ? 'The app will be closed.' : 'The game will be closed. Unsaved progress may be lost.',
+      text: st.kind === 'media' ? 'The app will be closed.' : st.resumable ? 'Quick Resume saves your place, so the next start picks up right here.' : 'The game will be closed. Unsaved progress may be lost.',
       buttons: [{ label: st.kind === 'media' ? 'Close app' : 'Close game', value: true, danger: true, icon: 'close' }, { label: 'Cancel', value: false }],
     });
     if (!ok) return;

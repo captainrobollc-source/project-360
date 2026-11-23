@@ -363,6 +363,25 @@ body.theme-classic .blade .ambient.on { opacity: .2; }
 .sys-tile .sys-status.ok { background: var(--pill); }
 .games-grid-small { display: grid; grid-template-columns: repeat(6, 1fr); gap: 24px 20px; }
 .games-grid-small .tile { aspect-ratio: 2 / 3; }
+.pane .sec-k { font-size: 16px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-dim); margin: 26px 0 18px; }
+.pane h2 + .sec-k, .pane .lead + .sec-k { margin-top: 6px; }
+.games-grid-small.recent-row { margin-bottom: 4px; }
+/* Quick Resume: a saved place to pick up from */
+.tile .qr-badge { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 6px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #fff; background: rgba(16, 124, 16, .88); border: 1px solid rgba(255,255,255,.35); white-space: nowrap; overflow: hidden; }
+.tile .qr-badge svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
+/* System tiles carry a fan of their own box covers */
+.sys-tile .sys-art { position: absolute; right: 16px; top: 16px; height: calc(100% - 104px); width: 40%; pointer-events: none; }
+.sys-tile .sys-art img { position: absolute; top: 0; height: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 6px; box-shadow: 0 6px 14px rgba(0,0,0,.5); right: calc(var(--i) * 22%); transform: rotate(calc(var(--i) * -6deg)); transform-origin: bottom center; z-index: calc(3 - var(--i)); opacity: calc(1 - var(--i) * .18); }
+.sys-tile .sys-short, .sys-tile .sys-foot { position: relative; z-index: 4; }
+.sys-tile .sys-art ~ .sys-short { max-width: 52%; }
+.sys-tile .sys-art ~ .sys-foot .sys-meta { max-width: 100%; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+.sys-minis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.sys-mini { padding: 12px 14px 12px 18px; border-radius: 12px; background: var(--row-bg); border: 1px solid var(--row-border); border-left: 6px solid var(--s1); cursor: pointer; transition: transform 160ms var(--ease), background 160ms, box-shadow 160ms; min-width: 0; }
+.sys-mini .n { font-size: 20px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-mini .m { font-size: 14px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys-mini.focused { background: var(--pill); border-color: transparent; box-shadow: var(--pill-glow); transform: scale(1.04); border-left-color: #fff; }
+.sys-mini.focused .n, .sys-mini.focused .m { color: #fff; }
+.row.emu-setup { border-color: rgba(118,185,0,.55); }
 
 /* ---------- Retro tiles ---------- */
 .tile.retro .frame .bgblur { position: absolute; inset: -12%; background-size: cover; background-position: center; filter: blur(16px) saturate(1.2) brightness(.55); }

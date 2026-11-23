@@ -49,7 +49,7 @@ class Launcher extends EventEmitter {
       phase: c.phase, id: c.item.id, title: c.item.title, kind: c.kind,
       startedAt: c.startedAt, runningSince: c.runningSince, revealed: c.revealed,
       tracked: c.tracked, attention: c.attention, controllerMouse: !!c.item.controllerMouse,
-      emulator: c.item.emulator || null, systemId: c.item.systemId || null,
+      emulator: c.item.emulator || null, systemId: c.item.systemId || null, resumable: !!c.item.resumable,
     };
   }
 

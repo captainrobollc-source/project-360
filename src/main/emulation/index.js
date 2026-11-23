@@ -31,13 +31,59 @@ function findFile(dir, re, depth = 4) {
   return null;
 }
 
-function titleFrom(file) {
-  return path.basename(file, path.extname(file)).replace(/[_.]+/g, ' ').replace(/\s*[([].*?[)\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+// Display title from a file or folder name (no extension):
+//   "Pokémon HeartGold (NTR-IPKE) (Rev. 0)"                    → "Pokémon HeartGold"
+//   "SUPER MARIO 3D WORLD [Game]0005000010145d00](axekin.com)" → "Super Mario 3D World"
+//   "The Legend of Zelda_ Phantom Hourglass"                    → "The Legend of Zelda: Phantom Hourglass"
+const SMALL_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'in', 'of', 'on', 'or', 'the', 'to', 'vs']);
+const ROMAN = /^(i{1,3}|iv|vi{0,3}|ix|x|xi{1,3})$/i;
+function titleCase(s) {
+  return s.split(' ').map((w, i) => {
+    if (/\d/.test(w) || ROMAN.test(w)) return w.toUpperCase(); // 3D, 64, II
+    const lw = w.toLowerCase();
+    if (i > 0 && SMALL_WORDS.has(lw)) return lw;
+    return lw.charAt(0).toUpperCase() + lw.slice(1);
+  }).join(' ');
+}
+function cleanTitle(name) {
+  let t = String(name);
+  if (!/\s/.test(t) && /\./.test(t)) t = t.replace(/\./g, ' ');          // Scene.Style.Names
+  t = t.replace(/_\s+/g, ': ').replace(/_+/g, ' ');                        // "Zelda_ Phantom": a colon that couldn't be a file name
+  t = t.replace(/\s*[([][^)\]]*[)\]]/g, ' ');                              // (USA) [!] (Rev 1) (Disc 1) (site.com)
+  t = t.replace(/\b[0-9a-f]{16}\b/gi, ' ');                                // Wii U / Xbox 360 title ids
+  t = t.replace(/[[\]()]/g, ' ');                                          // brackets left unbalanced
+  t = t.replace(/\b[\w-]+\.(com|net|org|info|io|co|to)\b/gi, ' ');           // download-site tags
+  t = t.replace(/\s+/g, ' ').replace(/^[\s\-–:,]+|[\s\-–:,]+$/g, '').trim();
+  // SHOUTED NAMES (three words or more, so "FIFA 09" stays) get normal capitals.
+  if (t.split(' ').filter((w) => /[A-Z]/.test(w)).length >= 3 && t === t.toUpperCase()) t = titleCase(t);
+  return t || String(name).trim();
+}
+const discOf = (name) => { const m = /[([]\s*(?:disc|disk|cd)\s*(\d+)/i.exec(name); return m ? Number(m[1]) : 0; };
+// The name with its disc tag removed: discs of one game (same region, same version) share it.
+const discKey = (name) => String(name).replace(/\s*[([]\s*(?:disc|disk|cd)\s*\d+[^)\]]*[)\]]/i, '').trim().toLowerCase();
+// A Wii U NUS folder holds a game (title id 00050000…), not an update (0005000E…) or DLC
+// (0005000C…). The id is read from title.tmd, or from the folder name when the file is short.
+function wiiuGame(tmd, folderName) {
+  let high = null;
+  try {
+    const fd = fs.openSync(tmd, 'r');
+    try { const b = Buffer.alloc(4); if (fs.readSync(fd, b, 0, 4, 0x18c) === 4) high = b.toString('hex'); } finally { fs.closeSync(fd); }
+  } catch { /* unreadable: use the name */ }
+  if (!high || !/^0005/.test(high)) { const m = /\b(0005000[0-9a-f])[0-9a-f]{8}\b/i.exec(folderName); high = m ? m[1].toLowerCase() : null; }
+  if (high === '0005000e' || high === '0005000c') return false;
+  return !/[[(]\s*(update|dlc|patch)\s*[\])]/i.test(folderName);
+}
+
+// Names that say nothing about the game: use the folder's name instead.
+const GENERIC = /^(default|eboot|game|title|boot|main|disc|image)$/i;
+function titleFrom(file, folderName) {
+  const base = path.basename(file, path.extname(file));
+  return cleanTitle(GENERIC.test(base) && folderName ? folderName : base);
 }
 
 // Sets the keys we manage in an INI (or simple TOML) file, editing lines in place. Everything else
 // is kept exactly: other keys, repeated keys (DuckStation/PCSX2 lists), comments, order.
-function writeIni(file, sections, eol = '\r\n') {
+function writeIni(file, sections, eol = '\r\n', sep = ' = ') {
   let lines = [];
   try { lines = fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { /* new */ }
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
@@ -52,7 +98,7 @@ function writeIni(file, sections, eol = '\r\n') {
     if (!keys.length) return;
     let blanks = 0;
     while (out.length && out[out.length - 1].trim() === '') { out.pop(); blanks++; }
-    for (const [k, v] of keys) out.push(`${k} = ${v}`);
+    for (const [k, v] of keys) out.push(`${k}${sep}${v}`);
     while (blanks-- > 0) out.push('');
   };
   let cur = '';
@@ -61,7 +107,7 @@ function writeIni(file, sections, eol = '\r\n') {
     if (sec) { finishSection(cur); cur = sec[1].trim(); out.push(line); continue; }
     const kv = line.match(/^\s*([^=;#]+?)\s*=/);
     if (kv && todo[cur] && Object.prototype.hasOwnProperty.call(todo[cur], kv[1])) {
-      out.push(`${kv[1]} = ${todo[cur][kv[1]]}`);
+      out.push(`${kv[1]}${sep}${todo[cur][kv[1]]}`);
       delete todo[cur][kv[1]];
       continue;
     }
@@ -77,6 +123,76 @@ function writeIni(file, sections, eol = '\r\n') {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, out.join(eol) + eol);
 }
+// The value of section/key in an INI file, or undefined.
+function iniGet(file, section, key) {
+  let lines = [];
+  try { lines = fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { return undefined; }
+  let cur = '';
+  for (const line of lines) {
+    const sec = line.match(/^\s*\[(.+)\]\s*$/);
+    if (sec) { cur = sec[1].trim(); continue; }
+    const kv = line.match(/^\s*([^=;#]+?)\s*=\s*(.*)$/);
+    if (kv && cur === section && kv[1] === key) return kv[2].trim();
+  }
+  return undefined;
+}
+// Every key of one INI section.
+function iniSection(file, section) {
+  const out = {};
+  let lines = [];
+  try { lines = fs.readFileSync(file, 'utf8').split(/\r?\n/); } catch { return out; }
+  let cur = '';
+  for (const line of lines) {
+    const sec = line.match(/^\s*\[(.+)\]\s*$/);
+    if (sec) { cur = sec[1].trim(); continue; }
+    const kv = line.match(/^\s*([^=;#]+?)\s*=\s*(.*)$/);
+    if (kv && cur === section) out[kv[1]] = kv[2].trim();
+  }
+  return out;
+}
+// Player 1 hasn't been set up by the player: no bindings, or only the keyboard keys an emulator
+// maps by itself, on a plain controller type (a guitar, gun or mouse setup is theirs).
+function padFree(file, types) {
+  const p = iniSection(file, 'Pad1');
+  if (p.Type && !types.includes(p.Type)) return false;
+  return Object.entries(p).filter(([k]) => k !== 'Type').every(([, v]) => !v || /^Keyboard\//i.test(v));
+}
+const writeOnce = (file, body) => { if (!fs.existsSync(file)) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, body); } };
+
+// Controller bindings, matching what each emulator's own "automatic mapping" writes for an SDL
+// game controller (checked against their source), minus the Guide button, which belongs to
+// Project 360. Only written when the player has no bindings of their own.
+const SDL_AXES = { LLeft: '-LeftX', LRight: '+LeftX', LUp: '-LeftY', LDown: '+LeftY', RLeft: '-RightX', RRight: '+RightX', RUp: '-RightY', RDown: '+RightY' };
+const padBinds = (faces) => {
+  const o = {
+    Up: 'DPadUp', Right: 'DPadRight', Down: 'DPadDown', Left: 'DPadLeft', ...faces,
+    Select: 'Back', Start: 'Start', L1: 'LeftShoulder', R1: 'RightShoulder', L2: '+LeftTrigger', R2: '+RightTrigger',
+    L3: 'LeftStick', R3: 'RightStick', ...SDL_AXES, LargeMotor: 'LargeMotor', SmallMotor: 'SmallMotor',
+  };
+  return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, `SDL-0/${v}`]));
+};
+const DUCK_PAD = { Type: 'AnalogController', ...padBinds({ Triangle: 'Y', Circle: 'B', Cross: 'A', Square: 'X' }) };
+const PCSX2_PAD = { Type: 'DualShock2', ...padBinds({ Triangle: 'FaceNorth', Circle: 'FaceEast', Cross: 'FaceSouth', Square: 'FaceWest' }) };
+// Cemu: Wii U GamePad on XInput controller 1 (Cemu's own XInput defaults; positional face buttons).
+const CEMU_MAP = [[1, 13], [2, 12], [3, 15], [4, 14], [5, 8], [6, 9], [7, 42], [8, 43], [9, 4], [10, 5], [11, 0], [12, 1], [13, 2], [14, 3], [15, 6], [16, 7], [17, 39], [18, 45], [19, 44], [20, 38], [21, 41], [22, 47], [23, 46], [24, 40]];
+const CEMU_PAD = ['<?xml version="1.0" encoding="UTF-8"?>', '<emulated_controller>', '\t<type>Wii U GamePad</type>', '\t<toggle_display>0</toggle_display>', '\t<controller>',
+  '\t\t<api>XInput</api>', '\t\t<uuid>0</uuid>', '\t\t<display_name>Controller 1</display_name>', '\t\t<rumble>0.5</rumble>',
+  '\t\t<axis><deadzone>0.15</deadzone><range>1</range></axis>', '\t\t<rotation><deadzone>0.15</deadzone><range>1</range></rotation>', '\t\t<trigger><deadzone>0.15</deadzone><range>1</range></trigger>',
+  '\t\t<mappings>', ...CEMU_MAP.map(([m, b]) => `\t\t\t<entry><mapping>${m}</mapping><button>${b}</button></entry>`), '\t\t</mappings>', '\t</controller>', '</emulated_controller>', ''].join('\r\n');
+const CEMU_SETTINGS = '<?xml version="1.0" encoding="UTF-8"?>\r\n<content>\r\n\t<check_update>false</check_update>\r\n\t<fullscreen>true</fullscreen>\r\n</content>\r\n';
+// RPCS3: player 1 on XInput (a fresh RPCS3 uses the keyboard); PS button on Back+Start, not Guide.
+const RPCS3_PAD = 'Player 1 Input:\n  Handler: XInput\n  Device: "XInput Pad #1"\n  Config:\n    PS Button: "Back&Start"\n  Buddy Device: ""\n';
+// RetroArch screen styles (per launch, through --appendconfig). CRT/LCD use shaders the RetroArch
+// download ships in shaders\shaders_slang.
+const SCREENS = {
+  standard: { label: 'Standard' },
+  pixel: { label: 'Pixel perfect', cfg: 'video_scale_integer = "true"\nvideo_smooth = "false"\n' },
+  smooth: { label: 'Smooth', cfg: 'video_smooth = "true"\n' },
+  retro: { label: 'CRT / LCD', cfg: 'video_shader_enable = "true"\n', tv: 'crt/crt-easymode.slangp', handheld: 'handheld/lcd-grid-v2.slangp' },
+};
+const HANDHELDS = new Set(['gb', 'gbc', 'gba', 'nds', 'gg', 'ngp']);
+const CONFIG_VERSION = 2; // bump to re-run configure() for installed emulators after an update
+
 const tomlStr = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 class Emulation extends EventEmitter {
@@ -86,6 +202,14 @@ class Emulation extends EventEmitter {
     this.state = new JsonStore(path.join(userDir, 'emulation.json'), { emulators: {}, cores: {} });
     this.progress = {}; // id → { phase, received, total, error }
     this.ensureFolders();
+    if ((this.state.data.configVersion || 0) < CONFIG_VERSION) setTimeout(() => this.reconfigureAll(), 4000);
+  }
+
+  reconfigureAll() {
+    if (!this.driveReady() || this.moving) return;
+    for (const e of EMULATORS) if (this.exeOf(e.id)) { try { this.configure(e.id); } catch (err) { console.error('[emulation] configure', e.id, err.message); } }
+    this.state.data.configVersion = CONFIG_VERSION;
+    this.state.save();
   }
 
   root() { return this.settings.get('emulation.root') || path.join(app.getPath('home'), 'Emulation'); }
@@ -154,6 +278,10 @@ class Emulation extends EventEmitter {
   status() {
     const counts = this.lastCounts || {};
     return {
+      quickResume: this.quickResume(),
+      screen: this.screen(),
+      screens: Object.entries(SCREENS).map(([id, s]) => ({ id, label: s.label })),
+      setup: this.setupPlan(),
       root: this.root(),
       dirs: this.dirs(),
       driveReady: this.driveReady(),
@@ -163,7 +291,7 @@ class Emulation extends EventEmitter {
         const eff = this.effective(s);
         const emu = EMULATORS.find((e) => e.id === eff.emulator);
         return {
-          id: s.id, name: s.name, short: s.short, maker: s.maker, year: s.year, color: s.color, exts: s.exts,
+          id: s.id, name: s.name, short: s.short, maker: s.maker, year: s.year, color: s.color, exts: s.exts, folders: !!s.folders,
           emulator: eff.emulator, emulatorName: emu ? emu.name : eff.emulator, core: eff.core || null,
           usingFallback: !!eff.usingFallback, fallbackNote: s.fallback ? s.fallback.note : '', canRunWithoutBios: !!s.fallback,
           emulatorInstalled: !!this.exeOf(eff.emulator), coreInstalled: eff.core ? !!this.coreDll(eff.core) : true,
@@ -206,7 +334,13 @@ class Emulation extends EventEmitter {
           if (failed) break;
           bump();
           received += chunk.length;
-          if (!out.write(chunk)) await new Promise((r) => { out.once('drain', r); out.once('error', r); });
+          if (!out.write(chunk)) {
+            await new Promise((r) => {
+              const done = () => { out.off('drain', done); out.off('error', done); r(); };
+              out.once('drain', done);
+              out.once('error', done);
+            });
+          }
           if (id && Date.now() - last > 300) { last = Date.now(); this.setProgress(id, { phase: 'downloading', received, total }); }
         }
       } finally {
@@ -272,7 +406,10 @@ class Emulation extends EventEmitter {
       this.state.data.emulators[id] = { exe, version: src.version || '', installedAt: Date.now() };
       this.state.save();
       await this.configure(id);
-      if (id === 'retroarch') { try { await this.installAsset('info'); } catch { /* optional */ } }
+      if (id === 'retroarch') {
+        try { await this.installAsset('info'); } catch { /* optional */ }
+        this.installCoresForGames().catch(() => { /* each game still fetches its core when played */ });
+      }
       this.setProgress(id, null);
       this.emit('installed', { id, name: emu.name });
       if (id === 'rpcs3') this.installPs3Firmware().then(() => this.emit('firmware', { name: 'PS3 system software' })).catch((e) => this.emit('firmwareFailed', { error: e.message }));
@@ -323,6 +460,8 @@ class Emulation extends EventEmitter {
         system_directory: fwd(d.bios), savefile_directory: fwd(path.join(d.saves, 'retroarch')), savestate_directory: fwd(path.join(d.states, 'retroarch')),
         menu_driver: 'xmb', input_autoconfig_enable: 'true', input_menu_toggle_gamepad_combo: '2', // L3+R3; the Guide button belongs to Project 360
         notification_show_autoconfig: 'false', video_font_enable: 'true', savestate_thumbnail_enable: 'true', auto_screenshot_filename: 'true',
+        // Quick Resume: the state is saved on the way out and loaded on the next start.
+        savestate_auto_save: this.quickResume() ? 'true' : 'false', savestate_auto_load: this.quickResume() ? 'true' : 'false',
       };
       let text = '';
       try { text = fs.readFileSync(cfg, 'utf8'); } catch { /* new */ }
@@ -334,24 +473,58 @@ class Emulation extends EventEmitter {
       fs.mkdirSync(path.join(d.saves, 'retroarch'), { recursive: true });
       fs.mkdirSync(path.join(d.states, 'retroarch'), { recursive: true });
       fs.writeFileSync(cfg, text);
+      // The shipped controller profiles open RetroArch's menu with the Guide button, on top of
+      // Project 360's Guide. Its menu stays on L3+R3 and in the Guide's Emulator section.
+      for (const sub of ['xinput', 'sdl2', 'dinput', 'hid']) {
+        const ad = path.join(dir, 'autoconfig', sub);
+        let files = [];
+        try { files = fs.readdirSync(ad).filter((f) => f.toLowerCase().endsWith('.cfg')); } catch { continue; }
+        for (const f of files) {
+          const p = path.join(ad, f);
+          try {
+            const t = fs.readFileSync(p, 'utf8');
+            const lines = t.split('\n');
+            const kept = lines.filter((l) => !/^[ \t]*input_menu_toggle_btn/.test(l));
+            if (kept.length !== lines.length) fs.writeFileSync(p, kept.join('\n'));
+          } catch { /* leave that profile as it is */ }
+        }
+      }
     } else if (id === 'duckstation') {
       fs.writeFileSync(path.join(dir, 'portable.txt'), '');
-      writeIni(path.join(dir, 'settings.ini'), {
+      const ini = path.join(dir, 'settings.ini');
+      const pad = padFree(ini, ['AnalogController', 'DigitalController']);
+      writeIni(ini, {
         Main: { SetupWizardIncomplete: 'false', StartFullscreen: 'true', ConfirmPowerOff: 'false', SaveStateOnExit: 'true' },
         BIOS: { SearchDirectory: d.bios },
         AutoUpdater: { CheckAtStartup: 'false' },
+        ...(pad ? { InputSources: { SDL: 'true' }, Pad1: DUCK_PAD } : {}),
       });
     } else if (id === 'pcsx2') {
       fs.writeFileSync(path.join(dir, 'portable.ini'), '');
-      writeIni(path.join(dir, 'inis', 'PCSX2.ini'), {
-        UI: { SetupWizardIncomplete: 'false', StartFullscreen: 'true', ConfirmShutdown: 'false', HideMouseCursor: 'true' },
+      const ini = path.join(dir, 'inis', 'PCSX2.ini');
+      const pad = padFree(ini, ['DualShock2']);
+      writeIni(ini, {
+        // Without a SettingsVersion PCSX2 offers to reset every setting on start.
+        UI: { ...(iniGet(ini, 'UI', 'SettingsVersion') === undefined ? { SettingsVersion: '1' } : {}), SetupWizardIncomplete: 'false', StartFullscreen: 'true', ConfirmShutdown: 'false', HideMouseCursor: 'true' },
         Folders: { Bios: d.bios },
         AutoUpdater: { CheckAtStartup: 'false' },
+        ...(pad ? { InputSources: { SDL: 'true' }, Pad1: PCSX2_PAD } : {}),
       });
     } else if (id === 'cemu') {
-      fs.mkdirSync(path.join(dir, 'portable'), { recursive: true });
+      const p = path.join(dir, 'portable');
+      fs.mkdirSync(path.join(p, 'controllerProfiles'), { recursive: true });
+      writeOnce(path.join(p, 'settings.xml'), CEMU_SETTINGS); // no settings.xml = the Getting Started window
+      writeOnce(path.join(p, 'controllerProfiles', 'controller0.xml'), CEMU_PAD);
+    } else if (id === 'rpcs3') {
+      const base = fs.existsSync(path.join(dir, 'portable')) ? path.join(dir, 'portable') : dir;
+      writeOnce(path.join(base, 'config', 'input_configs', 'global', 'Default.yml'), RPCS3_PAD);
+      writeOnce(path.join(base, 'config', 'config.yml'), 'Miscellaneous:\n  Start games in fullscreen mode: true\n');
+      // No welcome box, and closing the game window doesn't ask "Exit Game?" (it would block closing).
+      writeIni(path.join(base, 'GuiConfigs', 'CurrentSettings.ini'), { main_window: { infoBoxEnabledWelcome: 'false', confirmationBoxExitGame: 'false' } }, '\n', '=');
     } else if (id === 'xenia') {
       fs.writeFileSync(path.join(dir, 'portable.txt'), '');
+      // Full screen, and the Guide button isn't passed to the game (it opens Project 360's Guide).
+      writeIni(path.join(dir, 'xenia-canary.config.toml'), { Display: { fullscreen: 'true' }, HID: { guide_button: 'false' } }, '\n');
     } else if (id === 'xemu') {
       const b = (n) => { const f = findFile(d.bios, new RegExp(`^${n}$`, 'i'), 0); return f ? fwd(f) : ''; };
       const files = {};
@@ -388,6 +561,7 @@ class Emulation extends EventEmitter {
         for (const line of readLines(f).slice(1)) { const parts = line.trim().split(/\s+/); if (parts.length >= 5) listed.add(key(path.resolve(d, parts[4].replace(/"/g, '')))); }
       }
     };
+    const has = (d, name) => { try { return fs.readdirSync(d).find((x) => x.toLowerCase() === name.toLowerCase()) || null; } catch { return null; } };
     const walk = (d, depth) => {
       if (depth > 3) return;
       let entries = [];
@@ -400,11 +574,22 @@ class Emulation extends EventEmitter {
           // Folder-based games
           if (sys.folders === 'ps3') {
             const eboot = [path.join(f, 'PS3_GAME', 'USRDIR', 'EBOOT.BIN'), path.join(f, 'USRDIR', 'EBOOT.BIN')].find((x) => fs.existsSync(x));
-            if (eboot) { out.push({ file: eboot, title: titleFrom(e.name) }); continue; }
+            if (eboot) { out.push({ file: eboot, title: cleanTitle(e.name), disc: discOf(e.name), gk: discKey(e.name) }); continue; }
           }
           if (sys.folders === 'wiiu') {
             const rpx = findFile(path.join(f, 'code'), /\.rpx$/i, 0);
-            if (rpx) { out.push({ file: rpx, title: titleFrom(e.name) }); continue; }
+            if (rpx) { out.push({ file: rpx, title: cleanTitle(e.name) }); continue; }
+            // NUS format (title.tmd + title.tik + .app/.h3 contents, as downloaded): boots from the .tmd.
+            const tmd = has(f, 'title.tmd');
+            if (tmd) {
+              if (!wiiuGame(path.join(f, tmd), e.name)) continue; // an update or DLC: Cemu installs those, they don't boot
+              out.push({ file: path.join(f, tmd), title: cleanTitle(e.name) });
+              continue;
+            }
+          }
+          if (sys.folders === 'x360') {
+            const xex = has(f, 'default.xex'); // an extracted disc
+            if (xex) { out.push({ file: path.join(f, xex), title: cleanTitle(e.name), disc: discOf(e.name), gk: discKey(e.name) }); continue; }
           }
           walk(f, depth + 1);
           continue;
@@ -412,11 +597,47 @@ class Emulation extends EventEmitter {
         const ext = path.extname(e.name).slice(1).toLowerCase();
         if (ext === 'm3u' || ext === 'cue' || ext === 'gdi') noteMembers(d, f, ext);
         if (!exts.has(ext)) continue;
-        out.push({ file: f, title: titleFrom(e.name) });
+        // A disc inside a folder of its own ("Skate 3 (USA)/Skate 3 (USA).iso") is still one game.
+        const base = path.basename(e.name, path.extname(e.name));
+        const disc = discOf(base) || discOf(path.basename(d));
+        out.push({ file: f, title: titleFrom(f, path.basename(d)), disc, gk: discKey(discOf(base) ? base : path.basename(d)) });
       }
     };
     for (const d of [dir, ...extra]) walk(d, 0);
-    return out.filter((r) => !listed.has(key(r.file)));
+    return this.groupDiscs(sys, out.filter((r) => !listed.has(key(r.file))));
+  }
+
+  // "Game (Disc 1)", "Game (Disc 2)" → one entry that starts disc 1. Systems that understand
+  // .m3u playlists get one (in <Emulation>/playlists) so the emulator can swap discs.
+  groupDiscs(sys, list) {
+    const groups = new Map();
+    const out = [];
+    for (const r of list) {
+      if (!r.disc) { out.push(r); continue; }
+      const k = r.gk || r.title.toLowerCase();
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    for (const discs of groups.values()) {
+      discs.sort((a, b) => a.disc - b.disc || a.file.localeCompare(b.file));
+      if (discs.length === 1) { out.push({ ...discs[0], discs: 1 }); continue; }
+      // The playlist is named after disc 1's file, so RetroArch keeps using the battery save,
+      // memory card and states it already made for that disc (and regions never share one).
+      let m3u = null;
+      if (sys.exts.includes('m3u')) {
+        const f = path.join(this.dirs().root, 'playlists', sys.id, `${path.basename(discs[0].file, path.extname(discs[0].file))}.m3u`);
+        const body = discs.map((x) => x.file).join('\r\n') + '\r\n';
+        try {
+          let cur = null;
+          try { cur = fs.readFileSync(f, 'utf8'); } catch { /* new */ }
+          if (cur !== body) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); }
+          m3u = f;
+        } catch { /* read-only drive: list the discs one by one instead */ }
+      }
+      if (m3u) out.push({ ...discs[0], discs: discs.length, launchFile: m3u });
+      else for (const d of discs) out.push({ ...d, title: `${d.title} (Disc ${d.disc})`, discs: 1 }); // no disc swapping here: one entry per disc
+    }
+    return out;
   }
   // The emulator/core a system actually uses: a BIOS-free fallback when its BIOS is missing.
   effective(sys) {
@@ -424,7 +645,8 @@ class Emulation extends EventEmitter {
     return sys;
   }
 
-  launchFor(sysIn, file) {
+  // opts.fresh: start from the beginning instead of the Quick Resume state.
+  launchFor(sysIn, file, opts = {}) {
     const sys = this.effective(sysIn);
     const emuId = sys.emulator;
     const exe = this.exeOf(emuId);
@@ -434,14 +656,19 @@ class Emulation extends EventEmitter {
       case 'retroarch': {
         const core = this.coreDll(sys.core);
         if (!core || !this.assetsReady(sys.core)) return { type: 'core-missing', target: sys.core }; // support files come with the core
-        return { type: 'exe', target: exe, args: ['-L', core, file, '-f'], cwd };
+        const args = ['-L', core, file, '-f'];
+        const extra = this.raAppend(sys, opts);
+        if (extra.length) args.push('--appendconfig', extra.join('|'));
+        const shader = this.screenShader(sys, exe);
+        if (shader) args.push('--set-shader', shader);
+        return { type: 'exe', target: exe, args, cwd };
       }
       case 'duckstation': return { type: 'exe', target: exe, args: ['-batch', '-fullscreen', '--', file], cwd };
       case 'pcsx2': return { type: 'exe', target: exe, args: ['-batch', '-fullscreen', '-nogui', '--', file], cwd };
       case 'cemu': return { type: 'exe', target: exe, args: ['-f', '-g', file], cwd };
       case 'xemu': return { type: 'exe', target: exe, args: ['-full-screen', '-dvd_path', file], cwd };
       case 'xenia': return { type: 'exe', target: exe, args: ['--fullscreen', file], cwd };
-      case 'rpcs3': return { type: 'exe', target: exe, args: ['--no-gui', file], cwd };
+      case 'rpcs3': return { type: 'exe', target: exe, args: ['--no-gui', '--fullscreen', file], cwd };
       default: return { type: 'emulator-missing', target: emuId };
     }
   }
@@ -460,7 +687,7 @@ class Emulation extends EventEmitter {
       counts[sys.id] = roms.length;
       const eff = this.effective(sys);
       for (const r of roms) {
-        const launch = this.launchFor(sys, r.file);
+        const launch = this.launchFor(sys, r.launchFile || r.file);
         const exe = launch.type === 'exe' ? path.basename(launch.target) : null;
         games.push({
           id: this.romId(r.file),
@@ -472,6 +699,8 @@ class Emulation extends EventEmitter {
           emulator: eff.emulator,
           installDir: path.dirname(r.file),
           romPath: r.file,
+          launchPath: r.launchFile || r.file, // a disc playlist for multi-disc games
+          discs: r.discs || 1,
           romName: path.basename(r.file, path.extname(r.file)),
           libretroSystem: sys.libretro,
           launch,
@@ -484,10 +713,10 @@ class Emulation extends EventEmitter {
   }
 
   // Rebuild a game's launch command (after installing its emulator/core).
-  relaunchInfo(game) {
+  relaunchInfo(game, opts = {}) {
     const sys = SYSTEMS.find((s) => s.id === game.systemId);
     if (!sys || !game.romPath) return game.launch;
-    return this.launchFor(sys, game.romPath);
+    return this.launchFor(sys, game.launchPath && fs.existsSync(game.launchPath) ? game.launchPath : game.romPath, opts);
   }
 
   system(id) { return SYSTEMS.find((s) => s.id === id); }
@@ -634,9 +863,142 @@ class Emulation extends EventEmitter {
     return map;
   }
 
+  // ------------------------------------------------------------------ Quick Resume
+  quickResume() { return this.settings.get('emulation.quickResume') !== false; }
+
+  setQuickResume(on) {
+    if (!this.settings.data.emulation) this.settings.data.emulation = {};
+    this.settings.data.emulation.quickResume = !!on;
+    this.settings.save();
+    for (const e of EMULATORS) if (this.exeOf(e.id)) { try { this.configure(e.id); } catch (err) { console.error('[emulation] configure', e.id, err.message); } }
+    return this.quickResume();
+  }
+
+  // Extra RetroArch config files for one launch (joined with "|" for --appendconfig).
+  raAppend(sys, opts = {}) {
+    const files = [];
+    const write = (name, body) => {
+      const f = path.join(this.dirs().tools, name);
+      try {
+        let cur = null;
+        try { cur = fs.readFileSync(f, 'utf8'); } catch { /* new */ }
+        if (cur !== body) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body); }
+        files.push(f);
+      } catch (e) { console.error('[emulation] appendconfig', e.message); }
+    };
+    if (opts.fresh && this.quickResume()) write('p360-start-over.cfg', 'savestate_auto_load = "false"\n');
+    const sc = SCREENS[this.screen()];
+    if (sc && sc.cfg && (!sc.tv || this.screenShader(sys))) write(`p360-screen-${this.screen()}.cfg`, sc.cfg);
+    return files;
+  }
+
+  screen() { const s = this.settings.get('emulation.screen'); return SCREENS[s] ? s : 'standard'; }
+  setScreen(s) {
+    if (!SCREENS[s]) throw new Error('Unknown screen style');
+    if (!this.settings.data.emulation) this.settings.data.emulation = {};
+    this.settings.data.emulation.screen = s;
+    this.settings.save();
+    return s;
+  }
+  // CRT for TV consoles, an LCD grid for handhelds; null when the shader files aren't there.
+  screenShader(sys, exe = this.exeOf('retroarch')) {
+    const sc = SCREENS[this.screen()];
+    if (!sc || !sc.tv || !exe) return null;
+    const f = path.join(path.dirname(exe), 'shaders', 'shaders_slang', ...(HANDHELDS.has(sys.id) ? sc.handheld : sc.tv).split('/'));
+    return fs.existsSync(f) ? f : null;
+  }
+
+  // Where a game's Quick Resume state is, if it has one: { at, file, thumb }.
+  resumeInfo(game) {
+    if (!game || !game.systemId || !this.quickResume()) return null;
+    const sys = this.system(game.systemId);
+    if (!sys) return null;
+    const eff = this.effective(sys);
+    if (eff.emulator === 'retroarch') {
+      const content = game.launchPath || game.romPath || '';
+      const base = path.basename(content, path.extname(content));
+      const root = path.join(this.dirs().states, 'retroarch');
+      // RetroArch sorts states into a folder named after the core (its default) or keeps them flat.
+      // Only the core this game runs on now counts: a state from another core won't be loaded.
+      const cands = [path.join(root, `${base}.state.auto`)];
+      const coreName = this.coreName(eff.core);
+      if (coreName) cands.push(path.join(root, coreName, `${base}.state.auto`));
+      else { try { for (const d of fs.readdirSync(root, { withFileTypes: true })) if (d.isDirectory()) cands.push(path.join(root, d.name, `${base}.state.auto`)); } catch { /* none yet */ } }
+      let best = null;
+      for (const f of cands) {
+        try { const st = fs.statSync(f); if (st.size > 0 && (!best || st.mtimeMs > best.at)) best = { at: st.mtimeMs, file: f }; } catch { /* missing */ }
+      }
+      if (best) { const png = `${best.file}.png`; best.thumb = fs.existsSync(png) ? png : null; }
+      return best;
+    }
+    return null; // standalone emulators name their resume saves by disc serial; not offered there
+  }
+
+  // Closing this game keeps its place (Quick Resume on, and it runs in RetroArch).
+  canResume(game) {
+    const sys = game && this.system(game.systemId);
+    return !!sys && this.quickResume() && this.effective(sys).emulator === 'retroarch';
+  }
+
+  // The name a core reports (RetroArch's per-core folder name), from its .info file.
+  coreName(core) {
+    const ra = this.exeOf('retroarch');
+    if (!ra || !core) return null;
+    if (!this.coreNames) this.coreNames = new Map();
+    if (!this.coreNames.has(core)) {
+      let name = null;
+      try { const m = /^\s*corename\s*=\s*"([^"]+)"/m.exec(fs.readFileSync(path.join(path.dirname(ra), 'info', `${core}_libretro.info`), 'utf8')); if (m) name = m[1]; } catch { /* no info files yet */ }
+      if (name) this.coreNames.set(core, name); else return null; // try again once the info files arrive
+    }
+    return this.coreNames.get(core);
+  }
+
+  // ------------------------------------------------------------------ one-press setup
+  // What playing every game you have still needs: emulators, cores, free support files.
+  setupPlan() {
+    const counts = this.lastCounts || {};
+    const emulators = new Set();
+    const cores = new Set();
+    for (const s of SYSTEMS) {
+      if (!counts[s.id]) continue;
+      const eff = this.effective(s);
+      if (!this.exeOf(eff.emulator)) emulators.add(eff.emulator);
+      if (eff.emulator === 'retroarch' && eff.core && (!this.coreDll(eff.core) || !this.assetsReady(eff.core))) cores.add(eff.core);
+    }
+    const name = (id) => (EMULATORS.find((e) => e.id === id) || {}).name || id;
+    return { emulators: [...emulators].map((id) => ({ id, name: name(id) })), cores: [...cores], ready: !emulators.size && !cores.size };
+  }
+
+  async installCoresForGames() {
+    const counts = this.lastCounts || {};
+    const failed = [];
+    for (const s of SYSTEMS) {
+      if (!counts[s.id]) continue;
+      const eff = this.effective(s);
+      if (eff.emulator !== 'retroarch' || !eff.core) continue;
+      try {
+        if (!this.coreDll(eff.core)) await this.installCore(eff.core);
+        else if (!this.assetsReady(eff.core)) await this.installAsset(eff.core);
+      } catch (e) { failed.push(`${s.short}: ${e.message}`); }
+    }
+    return failed;
+  }
+
+  async setupAll() {
+    this.notMoving();
+    const plan = this.setupPlan();
+    const done = [];
+    const failed = [];
+    for (const e of plan.emulators) {
+      try { await this.install(e.id); done.push(e.name); } catch (err) { failed.push(`${e.name}: ${err.message}`); }
+    }
+    if (this.exeOf('retroarch')) failed.push(...await this.installCoresForGames());
+    return { done, failed, plan: this.setupPlan() };
+  }
+
   // ------------------------------------------------------------------ RetroArch control
   retroarch(cmd) {
-    const allowed = ['SAVE_STATE', 'LOAD_STATE', 'RESET', 'MENU_TOGGLE', 'PAUSE_TOGGLE', 'STATE_SLOT_PLUS', 'STATE_SLOT_MINUS', 'FAST_FORWARD', 'SCREENSHOT', 'FULLSCREEN_TOGGLE'];
+    const allowed = ['SAVE_STATE', 'LOAD_STATE', 'RESET', 'MENU_TOGGLE', 'PAUSE_TOGGLE', 'STATE_SLOT_PLUS', 'STATE_SLOT_MINUS', 'FAST_FORWARD', 'SCREENSHOT', 'FULLSCREEN_TOGGLE', 'QUIT'];
     if (!allowed.includes(cmd)) throw new Error('Unknown command');
     return new Promise((resolve) => {
       const sock = dgram.createSocket('udp4');

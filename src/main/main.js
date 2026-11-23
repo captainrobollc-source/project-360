@@ -645,7 +645,7 @@ handle('arcade:finish', (e, key, result = {}) => {
 // Scripted test runs never start real games or apps on this PC (P360_ALLOW_LAUNCH=1 opts in).
 const NO_LAUNCH = !!process.env.P360_SCRIPT && !process.env.P360_ALLOW_LAUNCH;
 
-handle('game:launch', async (e, id) => {
+handle('game:launch', async (e, id, opts = {}) => {
   const g = library.game(id);
   if (!g) throw new Error('Game not found');
   if (NO_LAUNCH && g.source !== 'arcade') throw new Error('Launching is disabled in scripted test runs');
@@ -661,9 +661,13 @@ handle('game:launch', async (e, id) => {
     }
     if (g.launch.type === 'emulator-missing') throw new Error(`NEEDS_EMULATOR:${g.launch.target}`);
     g.watch = { dirs: [], exes: [path.basename(g.launch.target)] };
+    g.emulator = emulation.effective(emulation.system(g.systemId)).emulator; // a BIOS added since the scan changes it
     library.lib.save();
   }
-  const st = await launcher.launch(g, 'game');
+  // "Start over" runs this once without the Quick Resume state; the saved launch stays normal.
+  let item = g.systemId && opts && opts.fresh ? { ...g, launch: emulation.relaunchInfo(g, { fresh: true }) } : g;
+  if (g.systemId) item = { ...item, resumable: emulation.canResume(g) }; // the Guide says your place is saved
+  const st = await launcher.launch(item, 'game');
   launchProfile = settings.get('activeProfile');
   achievements.track('launch', { source: g.source });
   const slot = pads.findIndex((p) => p.connected);
@@ -882,7 +886,22 @@ handle('launcher:resume', async () => {
   if (launcher.state().phase === 'running') { suspendDashboard(); return launcher.focusGame(); }
   return false;
 });
-handle('launcher:forceClose', () => launcher.forceClose());
+handle('launcher:forceClose', () => closeCurrent());
+// Emulated games save as they quit (battery saves, the Quick Resume state). RetroArch is asked over
+// its command port first; every emulator gets longer than a PC game before anything is killed.
+async function closeCurrent() {
+  const c = launcher.current;
+  const item = c && c.item;
+  if (!item || !item.systemId) return launcher.forceClose();
+  const exe = item.launch && item.launch.target ? path.basename(item.launch.target).toLowerCase() : '';
+  if (exe === 'retroarch.exe') {
+    try { await emulation.retroarch('QUIT'); } catch { /* not listening: the window close below still works */ }
+    const until = Date.now() + 8000;
+    while (launcher.current === c && Date.now() < until) await new Promise((r) => setTimeout(r, 200));
+    if (launcher.current !== c) return true;
+  }
+  return launcher.forceClose({ graceMs: 12000 });
+}
 handle('launcher:detach', () => launcher.detach());
 handle('launcher:showAttention', async () => { suspendDashboard(); return launcher.focusGame(); });
 handle('launcher:showDashboard', async (e, blade) => {
@@ -1052,6 +1071,19 @@ emulation.on('installed', ({ name }) => {
 handle('emu:status', () => emulation.status());
 handle('emu:install', async (e, id) => { await emulation.install(id); await maybeRescan(true); return emulation.status(); });
 handle('emu:command', (e, cmd) => emulation.retroarch(cmd));
+handle('emu:setupAll', async () => { const r = await emulation.setupAll(); await maybeRescan(true); return r; });
+handle('emu:quickResume', (e, on) => emulation.setQuickResume(on));
+handle('emu:screen', (e, s) => emulation.setScreen(s));
+// Quick Resume info for some games: { id: { at, thumb } } (thumb: a p360://state/ url).
+handle('emu:resumes', (e, ids) => {
+  const out = {};
+  for (const id of [].concat(ids || []).slice(0, 400)) {
+    const g = library.game(id);
+    const r = g && emulation.resumeInfo(g);
+    if (r) out[id] = { at: r.at, thumb: r.thumb ? `p360://state/${encodeURIComponent(id)}?v=${Math.round(r.at)}` : null };
+  }
+  return out;
+});
 handle('emu:ps3fw', () => emulation.installPs3Firmware());
 handle('emu:freeFiles', async () => { const done = await emulation.installFreeFiles(); await maybeRescan(true); return done; });
 emulation.on('firmware', ({ name }) => toast({ kind: 'orb', icon: 'controller', title: `${name} installed`, text: 'PS3 games are ready', sound: 'achievement' }));
@@ -1234,6 +1266,12 @@ app.whenReady().then(() => {
         return serveFile(req, file);
       }
       let file;
+      if (u.hostname === 'state') {
+        const g = library.game(parts[0] || '');
+        const r = g && emulation.resumeInfo(g);
+        if (!r || !r.thumb) return new Response('not found', { status: 404 });
+        return new Response(await fs.promises.readFile(r.thumb), { headers: { 'content-type': 'image/png', 'cache-control': 'no-cache' } });
+      }
       if (u.hostname === 'art') file = path.join(USER, 'art', safeId(parts[0]), parts[1].replace(/[^a-z]/g, ''));
       else if (u.hostname === 'sounds') file = path.join(SOUNDS_DIR, path.basename(parts[0]), path.basename(parts[1]));
       if (!file || !fs.existsSync(file)) return new Response('not found', { status: 404 });

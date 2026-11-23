@@ -20,7 +20,7 @@ export function openDetails(id, { toast } = {}) {
       const logo = artUrl(g, 'logo');
       if (logo) hero.append(h('img.logo', { src: logo, alt: '' }));
       const m = g.meta || {};
-      const metaLine = [SOURCE_LABEL[g.source], g.platform, m.developer, m.released].filter(Boolean).join('  ·  ');
+      const metaLine = [SOURCE_LABEL[g.source], g.platform, g.discs > 1 ? `${g.discs} discs` : null, m.developer, m.released].filter(Boolean).join('  ·  ');
       const genres = (m.genres || []).slice(0, 4).join(', ');
 
       const play = button('Play', { icon: 'play', onActivate: () => { close(); launchGame(g.id); } });
@@ -52,6 +52,16 @@ export function openDetails(id, { toast } = {}) {
         },
       });
 
+      // Emulated games with a Quick Resume save also offer to start over.
+      const actions = h('div.actions', {}, play, fav, art, refresh, hide);
+      if (g.systemId) {
+        window.p360.emu.resumes([g.id]).then((r) => {
+          if (!r || !r[g.id] || !actions.isConnected) return;
+          const lbl = play.querySelector('span');
+          if (lbl) lbl.textContent = 'Resume';
+          actions.insertBefore(button('Start over', { icon: 'restart', onActivate: () => { close(); launchGame(g.id, { fresh: true }); } }), fav);
+        }).catch(() => {});
+      }
       panel.append(hero, h('div.body', {},
         logo ? null : h('div.dt', {}, g.title),
         logo ? h('div.dt', { style: { fontSize: '34px' } }, g.title) : null,
@@ -61,7 +71,7 @@ export function openDetails(id, { toast } = {}) {
           h('div.stat', {}, h('div.v', {}, fmtPlaytime(g.playtime)), h('div.k', {}, 'Played')),
           h('div.stat', {}, h('div.v', {}, fmtAgo(g.lastPlayed)), h('div.k', {}, 'Last played')),
           h('div.stat', {}, h('div.v', {}, String(g.launches || 0)), h('div.k', {}, 'Sessions'))),
-        h('div.actions', {}, play, fav, art, refresh, hide)));
+        actions));
       focus.set(play);
     },
   });

@@ -182,6 +182,7 @@ class Library extends EventEmitter {
         sizeOnDisk: g.sizeOnDisk || 0,
         systemId: g.systemId,
         emulator: g.emulator,
+        discs: g.discs || undefined,
         needsEmulator: !!(g.launch && g.launch.type === 'emulator-missing'),
         steamAppId: g.steamAppId,
         addedAt: g.addedAt,

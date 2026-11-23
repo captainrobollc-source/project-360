@@ -56,7 +56,8 @@ export function hideSplash(immediate = false) {
   setTimeout(() => s.el.remove(), immediate ? 0 : 450);
 }
 
-export async function launchGame(id) {
+// opts.fresh: an emulated game starts over instead of picking up its Quick Resume save.
+export async function launchGame(id, opts) {
   const g = gameById(id);
   if (!g) return;
   if (state.launcher.phase !== 'idle') {
@@ -69,17 +70,17 @@ export async function launchGame(id) {
   inFlight = true;
   sound.play('launch');
   showSplash(g);
-  try { await window.p360.library.launch(id); }
+  try { await window.p360.library.launch(id, opts); }
   catch (e) {
     hideSplash();
     const need = /NEEDS_EMULATOR:(\w+)/.exec(e.message);
-    if (need) offerEmulator(need[1], g);
+    if (need) offerEmulator(need[1], g, opts);
     else toastFn({ title: `Couldn't start ${g.title}`, text: e.message, sound: 'error' });
   }
   finally { setTimeout(() => { inFlight = false; }, 1500); }
 }
 
-async function offerEmulator(emuId, game) {
+async function offerEmulator(emuId, game, opts) {
   let st = null;
   try { st = await window.p360.emu.status(); } catch { /* ignore */ }
   const e = st && st.emulators.find((x) => x.id === emuId);
@@ -89,7 +90,7 @@ async function offerEmulator(emuId, game) {
     try { await window.p360.emu.install(emuId); } // joins the install already running
     catch (err) { return toastFn({ title: `Couldn't install ${e.name}`, text: err.message, sound: 'error' }); }
     inFlight = false;
-    return launchGame(game.id);
+    return launchGame(game.id, opts);
   }
   const { confirm } = await import('./modal.js');
   const ok = await confirm({
@@ -104,7 +105,7 @@ Install the official ${e.name} build from ${e.site}? It’s set up for your cont
   try { await window.p360.emu.install(emuId); }
   catch (err) { return toastFn({ title: `Couldn't install ${e.name}`, text: err.message, sound: 'error' }); }
   inFlight = false;
-  launchGame(game.id);
+  launchGame(game.id, opts);
 }
 
 export async function launchMedia(item) {

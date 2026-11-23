@@ -68,7 +68,7 @@ const EMULATORS = [
   { id: 'pcsx2', name: 'PCSX2', about: 'PlayStation 2.', exe: /^pcsx2-qt\.exe$/i, license: 'GPLv3', site: 'pcsx2.net', source: gh('PCSX2/pcsx2', /windows-x64-Qt\.7z$/i) },
   { id: 'cemu', name: 'Cemu', about: 'Wii U.', exe: /^cemu\.exe$/i, license: 'MPL 2.0', site: 'cemu.info', source: gh('cemu-project/Cemu', /windows-x64\.zip$/i) },
   { id: 'xemu', name: 'xemu', about: 'Original Xbox. Needs your own Xbox BIOS, MCPX boot ROM and HDD image.', exe: /^xemu\.exe$/i, license: 'GPLv2', site: 'xemu.app', source: gh('xemu-project/xemu', /^xemu-[\d.]+-windows-x86_64\.zip$/i) },
-  { id: 'xenia', name: 'Xenia Canary', about: 'Xbox 360. Compatibility varies by game.', exe: /^xenia_canary\.exe$/i, license: 'BSD', site: 'xenia.jp', source: gh('xenia-canary/xenia-canary-releases', /windows.*\.zip$/i) },
+  { id: 'xenia', name: 'Xenia Canary', about: 'Xbox 360. Compatibility varies by game.', exe: /^xenia_canary\.exe$/i, license: 'BSD', site: 'xenia.jp', source: gh('xenia-canary/xenia-canary', /windows.*\.(7z|zip)$/i) }, // releases moved here in 2026; the old -releases repo stopped
   { id: 'rpcs3', name: 'RPCS3', about: 'PlayStation 3. Needs the PS3 firmware (PS3UPDAT.PUP from Sony) installed once.', exe: /^rpcs3\.exe$/i, license: 'GPLv2', site: 'rpcs3.net', source: gh('RPCS3/rpcs3-binaries-win', /win64.*\.7z$/i) },
 ];
 
