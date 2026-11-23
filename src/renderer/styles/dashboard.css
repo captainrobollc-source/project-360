@@ -425,12 +425,13 @@ img.pixel, .pixel-bg { image-rendering: pixelated; }
 .blade.content-hidden * { animation-play-state: paused !important; }
 
 /* ---------- Arcade blade ---------- */
-.arcadeb { display: grid; grid-template-columns: 1fr 470px; gap: 34px; height: 100%; }
-.arcadeb .arc-shelf { display: flex; gap: 34px; align-items: flex-start; padding: 18px 0 0 6px; }
-.arcadeb .arc-item { width: 268px; flex: none; }
-.arcadeb .arc-item .tile { width: 268px; height: 402px; }
-.arcadeb .arc-name { margin-top: 18px; font-size: 26px; font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.arcadeb .arc-best { font-size: 19px; font-weight: 600; margin-top: 4px; }
+.arcadeb { display: grid; grid-template-columns: auto minmax(470px, 1fr); gap: 56px; height: 100%; }
+/* Two rows of three cabinets: the whole arcade at a glance. */
+.arcadeb .arc-shelf { display: grid; grid-template-columns: repeat(3, 178px); gap: 16px 40px; align-content: start; padding: 14px 0 0 6px; }
+.arcadeb .arc-item { width: 178px; }
+.arcadeb .arc-item .tile { width: 178px; height: 267px; }
+.arcadeb .arc-name { margin-top: 18px; font-size: 21px; font-weight: 600; color: var(--title); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.arcadeb .arc-best { font-size: 16px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .arcadeb .arc-info { display: flex; flex-direction: column; padding: 26px 30px; border-radius: 26px; background: var(--card-bg); border: 1px solid var(--card-border); box-shadow: var(--card-shadow); min-height: 0; overflow: hidden; }
 .arcadeb .arc-k { font-size: 15px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-dim); margin: 16px 0 8px; }
 .arcadeb .arc-k:first-child { margin-top: 0; }

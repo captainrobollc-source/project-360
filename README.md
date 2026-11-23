@@ -209,8 +209,8 @@ folder, drop in `blade`, `tick`, `select`, `back`, `guide`, `toast`, `error`, `l
 
 ## Arcade
 
-Three original games built into the dashboard, on their own **Arcade** blade (between Games and
-Retro): big covers, and for the selected game its description, your best and rank, playtime,
+Six original games built into the dashboard, on their own **Arcade** blade (between Games and
+Retro): a wall of covers, and for the selected game its description, your best and rank, playtime,
 leaderboard and achievements (Y shows the full leaderboard). They keep playtime like any game,
 each leaderboard is shared by every profile on the console, and arcade achievements count
 toward your gamerscore. Arcade and retro games stay on their own blades; the Games blade and
@@ -221,6 +221,12 @@ you played).
   aims and fires, LB/RB drop a bomb.
 - **Prism Breaker**: neon brick breaker with power-ups and handcrafted levels.
 - **Glow Link**: match-three puzzle; two-minute Blitz for the high score.
+- **Ribbon Rivals**: light-ribbon party racer for 1 to 4 players on one PC. Alone you run the
+  Gauntlet against CPU riders (leaderboard); with friends it's first to five round wins. Every
+  controller (and the keyboard) presses A on the join screen.
+- **Lumen Run**: endless tunnel runner; slip through gaps, graze barriers, chain shards.
+- **Orbit Golf**: nine holes of neon mini golf with bumpers, conveyors, teleporters and
+  gravity wells. Left stick aims, hold A to charge, release to putt.
 
 Start pauses (Resume, Restart, Quit). The Guide pauses the game too. Keyboard: WASD to move,
 arrow keys to aim, Space/Enter for A, Esc to pause.
@@ -340,7 +346,7 @@ src/preload.js       contextBridge API (sandboxed renderer)
 src/renderer/        vanilla ES modules, no build step
   js/dashboard.js    blade manager
   js/blades/*.js     home, games, media, profile, system
-  js/arcade/         arcade engine (input, pause, leaderboards) and the three games
+  js/arcade/         arcade engine (input, pause, leaderboards) and the six games
   js/components/     guide, toast, ring, modal/dialog/OSK, details, launch splash, tiles
   js/input.js        native XInput masks + Gamepad API + keyboard/mouse → actions
   js/nav.js          layer stack + spatial focus navigation

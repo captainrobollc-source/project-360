@@ -4,8 +4,12 @@ import { runGame, isRunning } from './engine.js';
 import pulse from './pulse.js';
 import prism from './prism.js';
 import glow from './glow.js';
+import ribbon from './ribbon.js';
+import lumen from './lumen.js';
+import golf from './golf.js';
 
-export const GAMES = { pulse, prism, glow };
+// Shelf order on the Arcade blade (two rows of three).
+export const GAMES = { pulse, prism, glow, ribbon, lumen, golf };
 
 // Library art drawn by each game (cover 2:3, hero 16:9, banner = hero crop), as data URLs.
 const SIZES = { cover: [600, 900], hero: [1280, 720], banner: [920, 430] };

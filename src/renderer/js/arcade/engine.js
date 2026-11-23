@@ -1,21 +1,25 @@
 // Arcade engine: runs one built-in game full screen inside the dashboard.
 //
 // A game module (see pulse.js / prism.js / glow.js) exports:
-//   { key, title, tagline, accent, controls: [[input, action], ...],
+//   { key, title, tagline, accent, controls: [[input, action], ...], players?: max local players,
 //     art: { cover(ctx, w, h), hero(ctx, w, h) },
-//     create(api) -> { update(dt), draw(ctx) } }
+//     create(api) -> { update(dt), draw(ctx), result?() -> { score, stats } } }
 //
 // api (passed to create):
 //   w, h            1920 × 1080 canvas
 //   input           .move {x,y} / .aim {x,y} in -1..1 (left / right stick, d-pad, WASD / arrow keys)
 //                   .down(b) / .pressed(b)  b: a b x y lb rb lt rt up down left right
+//                   (every controller and the keyboard merged into one)
+//                   .pads  one entry per controller plus the keyboard, for local multiplayer:
+//                          { id: 'pad0'… | 'keys', kind: 'pad' | 'keys', move, aim, down(b), pressed(b) }
 //   sfx(voices)     sound effects (sound.js sfx: tones and noise bursts)
 //   rand(a, b)      random number in [a, b)
 //   time()          seconds of play so far (pauses excluded)
 //   best            this player's best score so far (for the HUD)
-//   hud(ctx, { score, left: [...], right: [...] })   draws the standard top bar
+//   hud(ctx, { score, left: [...], right: [...], showBest? })   draws the standard top bar
 //   glow(color, radius)   cached soft-glow sprite (canvas) for additive drawing
-//   gameOver({ score, stats })   ends the run (stats feed the achievements)
+//   gameOver({ score, stats, title?, message? })   ends the run (stats feed the achievements;
+//                   title replaces "Game over", message is shown above the rank line)
 import { h } from '../util.js';
 import * as nav from '../nav.js';
 import * as sound from '../sound.js';
@@ -43,17 +47,28 @@ function dead(x, y, dz) {
   return { x: x * k, y: y * k };
 }
 
+function clampLen(v) { const m = Math.hypot(v.x, v.y); return m > 1 ? { x: v.x / m, y: v.y / m } : v; }
+
 function createInput({ twinStick = false } = {}) {
   const keys = new Set();
   const taps = new Set(); // keys pressed since the last frame (a quick tap still counts once)
   let now = {};
   let prev = {};
+  const padPrev = new Map(); // device id -> its buttons last frame
+  // One player's device: its own sticks and buttons, with presses counted per device.
+  const device = (id, kind, btns, move, aim) => {
+    const before = padPrev.get(id) || {};
+    padPrev.set(id, btns);
+    if (btns.left) move.x = -1; if (btns.right) move.x = 1; if (btns.up) move.y = -1; if (btns.down) move.y = 1;
+    return { id, kind, move: clampLen(move), aim, down: (b) => !!btns[b], pressed: (b) => !!btns[b] && !before[b] };
+  };
   const input = {
     move: { x: 0, y: 0 },
     aim: { x: 0, y: 0 },
     down: (b) => !!now[b],
     pressed: (b) => !!now[b] && !prev[b],
     any: () => Object.keys(now).some((k) => now[k] && !prev[k]),
+    pads: [],
     keys,
     taps,
     poll() {
@@ -61,20 +76,24 @@ function createInput({ twinStick = false } = {}) {
       taps.clear();
       prev = now;
       now = {};
+      const pads = [];
       let mx = 0, my = 0, ax = 0, ay = 0;
       for (const gp of navigator.getGamepads ? navigator.getGamepads() : []) {
         if (!gp || !gp.connected) continue;
         const b = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
-        for (const [name, i] of Object.entries(BTN)) if (b(i)) now[name] = true;
+        const btns = {};
+        for (const [name, i] of Object.entries(BTN)) if (b(i)) { now[name] = true; btns[name] = true; }
         const l = dead(gp.axes[0] || 0, gp.axes[1] || 0, 0.2);
         const r = dead(gp.axes[2] || 0, gp.axes[3] || 0, 0.25);
         if (Math.hypot(l.x, l.y) > Math.hypot(mx, my)) { mx = l.x; my = l.y; }
         if (Math.hypot(r.x, r.y) > Math.hypot(ax, ay)) { ax = r.x; ay = r.y; }
+        pads.push(device(`pad${gp.index}`, 'pad', btns, { x: l.x, y: l.y }, { x: r.x, y: r.y }));
       }
-      for (const [name, codes] of Object.entries(KEYS)) if (codes.some((c) => held.has(c))) now[name] = true;
+      const kb = {};
+      for (const [name, codes] of Object.entries(KEYS)) if (codes.some((c) => held.has(c))) { now[name] = true; kb[name] = true; }
       // Arrow keys aim (twin-stick on a keyboard) and also count as the d-pad.
       // (twin-stick games: arrows only aim, so WASD can move one way while firing another)
-      if (!twinStick) for (const [dir, code] of Object.entries(AIM_KEYS)) if (held.has(code)) now[dir] = true;
+      if (!twinStick) for (const [dir, code] of Object.entries(AIM_KEYS)) if (held.has(code)) { now[dir] = true; kb[dir] = true; }
       if (now.left) mx = -1; if (now.right) mx = 1; if (now.up) my = -1; if (now.down) my = 1;
       const kax = (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0);
       const kay = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
@@ -83,6 +102,9 @@ function createInput({ twinStick = false } = {}) {
       if (mm > 1) { mx /= mm; my /= mm; }
       input.move = { x: mx, y: my };
       input.aim = { x: ax, y: ay };
+      const km = Math.hypot(kax, kay);
+      pads.push(device('keys', 'keys', kb, { x: 0, y: 0 }, km ? { x: kax / km, y: kay / km } : { x: 0, y: 0 }));
+      input.pads = pads;
     },
   };
   return input;
@@ -106,7 +128,7 @@ export function glowSprite(color, radius = 32) {
   return c;
 }
 
-function drawHud(ctx, def, { score = 0, left = [], right = [] } = {}, best = 0) {
+function drawHud(ctx, def, { score = 0, left = [], right = [], showBest = true } = {}, best = 0) {
   ctx.save();
   const grd = ctx.createLinearGradient(0, 0, 0, 110);
   grd.addColorStop(0, 'rgba(0,0,0,.65)');
@@ -127,7 +149,7 @@ function drawHud(ctx, def, { score = 0, left = [], right = [] } = {}, best = 0) 
   ctx.fillText(Math.round(score).toLocaleString(), W - 48, 18);
   ctx.font = '20px "Segoe UI", sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,.6)';
-  const bits = [...right, best ? `Best ${Math.round(best).toLocaleString()}` : null].filter(Boolean);
+  const bits = [...right, showBest && best ? `Best ${Math.round(best).toLocaleString()}` : null].filter(Boolean);
   ctx.fillText(bits.join('   ·   '), W - 48, 80);
   ctx.restore();
 }
@@ -305,12 +327,21 @@ export function runGame(def, { onExit } = {}) {
     if (res && res.board) board = res.board;
     if (res && res.best) storedBest = res.best;
     const mine = res && res.rank ? board[res.rank - 1] : null;
-    const msg = res && res.rank === 1 ? 'New top score!' : res && res.rank ? `#${res.rank} on the leaderboard` : res && res.personalBest ? 'Personal best!' : `Best: ${myBest().toLocaleString()}`;
+    const rankMsg = res && res.rank === 1 ? 'New top score!' : res && res.rank ? `#${res.rank} on the leaderboard` : res && res.personalBest ? 'Personal best!' : '';
+    // A game can name the result itself ("Magenta wins!", "Course complete"); a scoreless result
+    // (a party match) shows no big zero.
+    const own = typeof result.message === 'string' && result.message ? result.message : '';
+    const msg = own || rankMsg || `Best: ${myBest().toLocaleString()}`;
+    const showScore = score > 0 || !result.title;
     sound.play(res && res.rank ? 'achievement' : 'toast');
-    menu('Game over', null, [
+    menu(typeof result.title === 'string' && result.title ? result.title : 'Game over', null, [
       { label: 'Play again', icon: 'restart', fn: start },
       { label: 'Back to dashboard', icon: 'home', fn: exit },
-    ], h('div.arc-over', {}, h('div.arc-score', {}, score.toLocaleString()), h('div.arc-msg', {}, msg), boardEl(board, { highlightAt: mine && mine.at })), { delay: 600 });
+    ], h('div.arc-over', {},
+      showScore ? h('div.arc-score', {}, score.toLocaleString()) : null,
+      h('div.arc-msg', {}, msg),
+      own && rankMsg ? h('div.arc-msg.rank', {}, rankMsg) : null,
+      boardEl(board, { highlightAt: mine && mine.at })), { delay: 600 });
   }
 
   function exit() {

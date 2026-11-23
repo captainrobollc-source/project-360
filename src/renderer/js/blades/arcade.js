@@ -9,12 +9,16 @@ import { openDetails } from '../components/details.js';
 import { modal, button } from '../components/modal.js';
 import { GAMES, playArcade } from '../arcade/index.js';
 
-const ORDER = ['pulse', 'prism', 'glow'];
+const ORDER = Object.keys(GAMES); // shelf order = registry order (arcade/index.js)
 const ACH = {
   pulse: ['pulse-50k', 'pulse-wave10', 'pulse-nobomb'],
   prism: ['prism-level5', 'prism-perfect', 'prism-multiball'],
   glow: ['glow-20k', 'glow-cascade', 'glow-nova'],
+  ribbon: ['ribbon-round10', 'ribbon-party', 'ribbon-gaps'],
+  lumen: ['lumen-5k', 'lumen-graze', 'lumen-chain'],
+  golf: ['golf-ace', 'golf-under', 'golf-bank'],
 };
+const playersText = (def) => (def.players > 1 ? `1–${def.players} players` : '');
 
 export function arcadeBlade(ctx) {
   const root = h('div.arcadeb');
@@ -80,11 +84,14 @@ export function arcadeBlade(ctx) {
     const b = best(key);
     const r = rank(key);
     const ach = state.achievements.list || [];
-    const mine = ACH[key].map((id) => ach.find((a) => a.id === id)).filter(Boolean);
+    const mine = (ACH[key] || []).map((id) => ach.find((a) => a.id === id)).filter(Boolean);
     const got = mine.filter((a) => a.unlockedAt).length;
+    const arcadeIds = [...Object.values(ACH).flat(), 'arcade-rat', 'top-of-the-board'];
+    const gotAll = arcadeIds.filter((id) => (ach.find((a) => a.id === id) || {}).unlockedAt).length;
+    ctx.setSub(`${ORDER.length} games · ${gotAll} of ${arcadeIds.length} arcade achievements`);
 
     panel.replaceChildren(
-      h('div.arc-k', {}, def.tagline),
+      h('div.arc-k', {}, [def.tagline, playersText(def)].filter(Boolean).join(' · ')),
       h('div.arc-ptitle', { style: { color: def.accent } }, def.title),
       h('div.arc-desc', {}, (g.meta && g.meta.description) || ''),
       h('div.arc-stats', {},

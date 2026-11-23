@@ -14,6 +14,18 @@ const CATALOG = [
     key: 'glow', title: 'Glow Link', year: 2026, genre: 'Puzzle', players: '1 player',
     description: 'Swap glowing orbs to line up three or more. Big matches make special orbs, cascades multiply your score, and a two-minute Blitz decides who tops the board.',
   },
+  {
+    key: 'ribbon', title: 'Ribbon Rivals', year: 2026, genre: 'Party', players: '1-4 players',
+    description: 'Ride a ribbon of light through a neon arena and make sure everyone else crashes first. Slip through the gaps, boost past your rivals and climb the solo Gauntlet, or bring up to three friends for a first-to-five party.',
+  },
+  {
+    key: 'lumen', title: 'Lumen Run', year: 2026, genre: 'Tunnel runner', players: '1 player',
+    description: 'Race down a tunnel of light as rings, spinning bars and pulsing gates rush at you. Collect shards without missing one to build your chain, skim walls for graze bonuses, and hold A to phase through when there’s no way around.',
+  },
+  {
+    key: 'golf', title: 'Orbit Golf', year: 2026, genre: 'Mini golf', players: '1 player',
+    description: 'Putt across nine neon holes built into a space station. Bank off rails and bumpers, ride conveyor belts, dodge blast doors and hull breaches, and bend your shot around a planet’s gravity to sink it in as few strokes as you can.',
+  },
 ];
 const BOARD_SIZE = 10;
 

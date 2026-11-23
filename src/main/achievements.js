@@ -37,7 +37,7 @@ const DEFS = [
   { id: 'daily-dose', title: 'Daily Dose', desc: 'Play on 7 different days.', points: 30, icon: 'flame' },
   { id: 'clean-slate', title: 'Clean Slate', desc: 'Hide a game you never play.', points: 5, icon: 'eyeoff' },
   // Built-in arcade
-  { id: 'arcade-rat', title: 'Arcade Rat', desc: 'Play all three arcade games.', points: 15, icon: 'controller' },
+  { id: 'arcade-rat', title: 'Arcade Rat', desc: 'Play every arcade game.', points: 15, icon: 'controller' },
   { id: 'top-of-the-board', title: 'Top of the Board', desc: 'Take first place on an arcade leaderboard.', points: 15, icon: 'crown' },
   { id: 'pulse-50k', title: 'Pulse Check', desc: 'Pulse Arena: score 50,000 points.', points: 20, icon: 'bolt' },
   { id: 'pulse-wave10', title: 'Ring Master', desc: 'Pulse Arena: reach wave 10.', points: 25, icon: 'bolt' },
@@ -48,6 +48,15 @@ const DEFS = [
   { id: 'glow-20k', title: 'Bright Idea', desc: 'Glow Link: score 20,000 in one Blitz.', points: 20, icon: 'trophy' },
   { id: 'glow-cascade', title: 'Chain Reaction', desc: 'Glow Link: set off a 5-step cascade.', points: 20, icon: 'trophy' },
   { id: 'glow-nova', title: 'Supernova', desc: 'Glow Link: make a Nova orb by matching five.', points: 15, icon: 'trophy' },
+  { id: 'ribbon-round10', title: 'Last Rider Standing', desc: 'Ribbon Rivals: reach round 10 of the Gauntlet.', points: 25, icon: 'flame' },
+  { id: 'ribbon-party', title: 'Couch Rivals', desc: 'Ribbon Rivals: finish a party match with two or more players.', points: 15, icon: 'user' },
+  { id: 'ribbon-gaps', title: 'Needle Threader', desc: 'Ribbon Rivals: slip through 3 ribbon gaps in one round.', points: 20, icon: 'flame' },
+  { id: 'lumen-5k', title: 'Light Speed', desc: 'Lumen Run: travel 5,000 m in one run.', points: 25, icon: 'bolt' },
+  { id: 'lumen-graze', title: 'Hair\u2019s Breadth', desc: 'Lumen Run: graze 25 obstacles in one run.', points: 20, icon: 'bolt' },
+  { id: 'lumen-chain', title: 'Shard Collector', desc: 'Lumen Run: collect 50 shards in a row.', points: 15, icon: 'bolt' },
+  { id: 'golf-ace', title: 'Hole in One', desc: 'Orbit Golf: sink a hole in one.', points: 20, icon: 'star' },
+  { id: 'golf-under', title: 'Under Par', desc: 'Orbit Golf: finish the course under par.', points: 25, icon: 'star' },
+  { id: 'golf-bank', title: 'Trick Shot', desc: 'Orbit Golf: sink a putt after bouncing off 3 walls or bumpers.', points: 15, icon: 'star' },
 ];
 const BLADES = ['marketplace', 'social', 'home', 'games', 'arcade', 'retro', 'media', 'system'];
 const DEF = Object.fromEntries(DEFS.map((d) => [d.id, d]));
@@ -151,6 +160,18 @@ class Achievements extends EventEmitter {
           if (data.score >= 20000) this.unlock('glow-20k');
           if ((x.maxCascade || 0) >= 5) this.unlock('glow-cascade');
           if ((x.novas || 0) > 0) this.unlock('glow-nova');
+        } else if (data.game === 'ribbon') {
+          if (!x.party && (x.round || 0) >= 10) this.unlock('ribbon-round10');
+          if (x.party && x.matchDone && (x.humans || 0) >= 2) this.unlock('ribbon-party');
+          if ((x.maxGapsInRound || 0) >= 3) this.unlock('ribbon-gaps');
+        } else if (data.game === 'lumen') {
+          if ((x.distance || 0) >= 5000) this.unlock('lumen-5k');
+          if ((x.grazes || 0) >= 25) this.unlock('lumen-graze');
+          if ((x.maxChain || 0) >= 50) this.unlock('lumen-chain');
+        } else if (data.game === 'golf') {
+          if ((x.aces || 0) > 0) this.unlock('golf-ace');
+          if (x.finished && (x.toPar || 0) < 0) this.unlock('golf-under');
+          if ((x.maxBankSink || 0) >= 3) this.unlock('golf-bank');
         }
         break;
       }

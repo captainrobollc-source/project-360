@@ -316,6 +316,7 @@ body.arcade-open .prompts { opacity: 1; }
 .arc-over { margin: 26px 0 8px; }
 .arc-score { font-size: 96px; font-weight: 200; line-height: 1; font-variant-numeric: tabular-nums; }
 .arc-msg { font-size: 26px; color: var(--lime-glow, #9bc848); margin: 8px 0 24px; }
+.arc-msg + .arc-msg.rank { margin-top: -18px; font-size: 20px; opacity: .85; }
 .arc-btns { display: flex; gap: 16px; margin-top: 30px; }
 .arc-btns .pill-btn { flex: 1; font-size: 24px; padding: 18px 26px; }
 
